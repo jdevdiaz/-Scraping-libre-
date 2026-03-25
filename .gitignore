@@ -1,0 +1,73 @@
+# ==============================
+# Entornos Virtuales
+# ==============================
+.env_scraping/
+venv/
+env/
+.venv/
+
+# ==============================
+# Python y Bytecode
+# ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ==============================
+# Archivos de Ambiente y Secretos
+# ==============================
+.env
+.env.*
+!.env.example
+
+# ==============================
+# Bases de Datos y Datos Extraídos
+# ==============================
+# (Descomenta las siguientes líneas si no quieres subir los JSON/CSVs de scraping a tu repositorio)
+data/*.json
+data/*.csv
+*.sqlite3
+
+# ==============================
+# Archivos de Logs y Depuración
+# ==============================
+*.log
+logs/*.log
+*.html       # Ignora archivos como ml_debug.html
+.aider*      # Archivos del asistente Aider
+
+# ==============================
+# Playwright y Caching
+# ==============================
+.python-hosting/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ==============================
+# Editores y OS
+# ==============================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db.env_scraping/
+__pycache__/
+*.html

@@ -1,0 +1,19 @@
+# ==========================================
+# Requisitos del Proyecto - Web Scraping Mercado Libre
+# ==========================================
+
+# Motor principal asíncrono y headless
+playwright==1.42.0
+
+# Herramientas de evasión (Stealth Mode)
+playwright-stealth==1.0.6
+
+# Manejo de Entorno y Configuración Avanzada
+python-dotenv==1.0.1
+PyYAML==6.0.1
+
+# ==========================================
+# Dependencias de Desarrollo y Código Limpio
+# ==========================================
+black>=24.2.0
+flake8>=7.0.0
