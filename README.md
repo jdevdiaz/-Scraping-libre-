@@ -116,3 +116,76 @@ python -m src.services.extractor
 - [ ] Manejo de persistencia agnóstica: Guardar transparentemente hacia PostgreSQL o MongoDB a través de un Adapter.
 - [ ] Validaciones profundas sobre los Data Classes (Ej. migración a `Pydantic` o `Marshmallow`).
 - [ ] Sistema de reintentos exponencial y control frente a posibles CAPTCHAs.
+
+---
+
+## Pipeline Hibrido: Telegram + n8n + Google Sheets + Streamlit
+
+Este proyecto ahora incluye un **pipeline de automatizacion completo** que extiende el scraper base con una capa de orquestacion (n8n Cloud), interfaz de usuario (Telegram Bot) y dashboard analitico (Streamlit).
+
+### Arquitectura Extendida
+
+```text
+-Scraping-libre-/
+├── config/                    # Configuraciones del scraper original
+├── src/                       # Codigo fuente del scraper (Playwright)
+├── docs/
+│   ├── architecture.md
+│   ├── dev_log.md
+│   ├── scraping_notes.md
+│   └── n8n_cloud_guide.md     # [NUEVO] Guia de nodos para n8n Cloud
+├── streamlit_app/             # [NUEVO] Dashboard de analitica visual
+│   ├── app.py                 # Aplicacion Streamlit principal
+│   ├── requirements.txt       # Dependencias Python del dashboard
+│   ├── .env.example           # Variables de entorno de ejemplo
+│   └── credentials/           # (gitignored) Credenciales de Google
+├── main.py                    # Punto de entrada del scraper original
+├── requirements.txt           # Dependencias del scraper
+└── .gitignore
+```
+
+### Flujo de Datos
+
+```
+Usuario (Telegram)
+    │  /buscar [tipo] [url] [producto] [guardar]
+    ▼
+n8n Cloud (Webhook)
+    │  Parser → Switch → Scraping/LLM → Reporte
+    ▼
+Google Sheets
+    │  Scraping_Estatico / Scraping_Dinamico
+    ▼
+Streamlit Dashboard (MX Linux)
+    │  Visualizacion interactiva con Plotly
+    ▼
+Usuario
+```
+
+### Comandos del Bot
+
+| Comando | Descripcion |
+|---------|------------|
+| `/buscar estatico [URL]` | Auditoria SEO (no guarda) |
+| `/buscar estatico [URL] guardar` | Auditoria SEO + guarda en Sheets |
+| `/buscar dinamico [URL] [producto]` | Scraping e-commerce (no guarda) |
+| `/buscar dinamico [URL] [producto] guardar` | Scraping e-commerce + guarda en Sheets |
+
+### Configurar el Dashboard Streamlit
+
+```bash
+# 1. Instalar dependencias
+cd streamlit_app
+pip install -r requirements.txt
+
+# 2. Configurar credenciales de Google
+cp .env.example .env
+# Editar .env con la ruta a tu service account JSON
+
+# 3. Ejecutar
+streamlit run app.py
+```
+
+### Documentacion de n8n
+
+Ver la guia completa de nodos en [`docs/n8n_cloud_guide.md`](docs/n8n_cloud_guide.md).

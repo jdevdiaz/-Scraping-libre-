@@ -71,3 +71,12 @@ htmlcov/
 Thumbs.db.env_scraping/
 __pycache__/
 *.html
+
+# ==============================
+# Credenciales de Google (Streamlit)
+# ==============================
+streamlit_app/credentials/
+
+# Ignorar JSONs de credenciales pero permitir el workflow de n8n y datos de ejemplo
+!n8n/*.json
+!streamlit_app/.env.example
