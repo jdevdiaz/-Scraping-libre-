@@ -1,0 +1,20 @@
+# ==========================================
+# Dependencias - Streamlit Dashboard (Pipeline Híbrido)
+# ==========================================
+
+# Framework de visualización
+streamlit>=1.38.0
+
+# Conexión a Google Sheets
+gspread>=6.1.0
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+
+# Procesamiento de datos
+pandas>=2.2.0
+
+# Gráficos interactivos
+plotly>=5.22.0
+
+# Utilidades
+python-dotenv>=1.0.1

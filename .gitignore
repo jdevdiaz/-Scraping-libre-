@@ -71,3 +71,10 @@ htmlcov/
 Thumbs.db.env_scraping/
 __pycache__/
 *.html
+
+# ==============================
+# Credenciales de Google (Streamlit)
+# ==============================
+streamlit_app/credentials/
+*.json
+!streamlit_app/.env.example
