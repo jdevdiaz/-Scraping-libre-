@@ -71,6 +71,13 @@ def load_sheet_data(sheet_name: str) -> list[dict[str, Any]]:
 # ─── Funciones de procesamiento ──────────────────────────────────────────────
 
 
+def normalize_keys(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normaliza las claves de los registros: elimina espacios y unifica case."""
+    if not records:
+        return records
+    return [{k.strip(): v for k, v in row.items()} for row in records]
+
+
 def parse_json_cell(raw: str) -> list[dict[str, Any]]:
     """Deserializa de forma segura una celda que contiene JSON."""
     if not raw or not isinstance(raw, str):
@@ -181,7 +188,7 @@ def render_dynamic_dashboard(records: list[dict[str, Any]]) -> None:
 
     st.subheader("Historial de Búsquedas en E-commerce")
     st.dataframe(
-        df_records[[c for c in df_records.columns if c != "Datos_JSON"]],
+        df_records[[c for c in df_records.columns if c.lower() != "datos_json"]],
         use_container_width=True,
     )
 
@@ -190,7 +197,7 @@ def render_dynamic_dashboard(records: list[dict[str, Any]]) -> None:
         range(len(df_records)),
         format_func=lambda i: (
             f"{df_records.iloc[i].get('Fecha', 'N/A')} - "
-            f"\"{df_records.iloc[i].get('Query_Buscado', 'N/A')}\" en "
+            f"\"{df_records.iloc[i].get('Query_Buscado', df_records.iloc[i].get('Query_buscado', 'N/A'))}\" en "
             f"{df_records.iloc[i].get('URL_Origen', 'N/A')}"
         ),
         key="dynamic_selector",
@@ -198,11 +205,15 @@ def render_dynamic_dashboard(records: list[dict[str, Any]]) -> None:
 
     if selected_idx is not None:
         row = df_records.iloc[selected_idx]
-        json_raw = row.get("Datos_JSON", "")
+        json_col = next(
+            (c for c in df_records.columns if c.lower() == "datos_json"),
+            "Datos_JSON",
+        )
+        json_raw = row.get(json_col, "")
         items = parse_json_cell(str(json_raw))
 
         if not items:
-            st.warning("No se pudo deserializar la celda Datos_JSON.")
+            st.warning("No se pudo deserializar la celda Datos_JSON/Datos_json.")
             return
 
         df_products = build_dynamic_dataframe(items)
@@ -213,7 +224,7 @@ def render_dynamic_dashboard(records: list[dict[str, Any]]) -> None:
 
         st.markdown("---")
         st.markdown(
-            f"### Análisis: \"{row.get('Query_Buscado', '')}\" "
+            f"### Análisis: \"{row.get('Query_Buscado', row.get('Query_buscado', ''))}\" "
             f"({len(df_products)} productos)"
         )
 
@@ -346,11 +357,11 @@ def main() -> None:
     # Renderizar según selección
     if page == "Scraping Dinamico (E-commerce)":
         with st.spinner("Cargando datos dinámicos desde Google Sheets..."):
-            records = load_sheet_data("Scraping_Dinamico")
+            records = normalize_keys(load_sheet_data("Scraping_Dinamico"))
         render_dynamic_dashboard(records)
     else:
         with st.spinner("Cargando datos estáticos desde Google Sheets..."):
-            records = load_sheet_data("Scraping_Estatico")
+            records = normalize_keys(load_sheet_data("Scraping_Estatico"))
         render_static_dashboard(records)
 
 

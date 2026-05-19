@@ -1,0 +1,581 @@
+{
+  "name": "Pipeline Scraping Hibrido - Telegram + Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"]
+      },
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parser posicional del comando /buscar\nconst text = $input.first().json.message.text || '';\nconst parts = text.trim().split(/\\s+/);\n\nif (parts.length < 3 || parts[0] !== '/buscar') {\n  return [{\n    json: {\n      error: true,\n      mensaje: '❌ Formato inválido.\\n\\nUso:\\n/buscar estatico [URL]\\n/buscar dinamico [URL] [producto]\\n\\nEjemplos:\\n/buscar estatico https://wikipedia.org\\n/buscar dinamico https://mercadolibre.com.co ram'\n    }\n  }];\n}\n\nconst tipo = parts[1].toLowerCase();\nconst url = parts[2];\nlet buscar = '';\nlet guardar = false;\n\nif (tipo === 'dinamico') {\n  buscar = parts[3] || '';\n  guardar = (parts[4] || '').toLowerCase() === 'guardar';\n  buscar = buscar.replace(/-/g, ' ');\n} else if (tipo === 'estatico') {\n  guardar = (parts[3] || '').toLowerCase() === 'guardar';\n}\n\nconst chatId = $input.first().json.message.chat.id;\n\nreturn [{\n  json: { tipo, url, buscar, guardar, chatId, error: false }\n}];"
+      },
+      "id": "parser-comando",
+      "name": "Parser de Comando",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            {
+              "outputIndex": 0,
+              "conditions": {
+                "options": { "caseSensitive": false },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "estatico",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              }
+            },
+            {
+              "outputIndex": 1,
+              "conditions": {
+                "options": { "caseSensitive": false },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.tipo }}",
+                    "rightValue": "dinamico",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              }
+            },
+            {
+              "outputIndex": 2,
+              "conditions": {
+                "options": { "caseSensitive": false },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.error }}",
+                    "rightValue": true,
+                    "operator": { "type": "boolean", "operation": "equals" }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-tipo",
+      "name": "Switch Tipo",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Parser de Comando').first().json.url }}",
+        "options": {
+          "timeout": 15000,
+          "response": { "response": { "responseFormat": "text" } }
+        }
+      },
+      "id": "http-get-estatico",
+      "name": "HTTP GET Estatico",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.data || $input.first().json.body || '';\nconst url = $('Parser de Comando').first().json.url;\n\n// Extraer título\nconst titleMatch = html.match(/<title[^>]*>(.*?)<\\/title>/is);\nconst titulo = titleMatch ? titleMatch[1].trim() : 'Sin título';\n\n// Extraer meta description\nconst descMatch = html.match(/<meta\\s+name=[\"']description[\"']\\s+content=[\"'](.*?)[\"']/is);\nconst descripcion = descMatch ? descMatch[1].trim() : 'Sin descripción';\n\n// Contar encabezados\nconst countTag = (tag) => (html.match(new RegExp(`<${tag}[\\\\s>]`, 'gi')) || []).length;\nconst h1 = countTag('h1');\nconst h2 = countTag('h2');\nconst h3 = countTag('h3');\n\n// Contar enlaces\nconst enlaces = (html.match(/<a\\s/gi) || []).length;\n\n// Extraer palabras clave (top 5)\nconst textOnly = html\n  .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n  .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .toLowerCase();\n\nconst stopWords = new Set([\n  'de','la','el','en','y','a','los','del','las','un','por',\n  'con','no','una','su','para','es','al','que','se','lo',\n  'como','más','o','pero','sus','le','ya','the','and','of',\n  'to','in','is','it','for','on','with','as','at','this',\n  'be','are','an','was','or','not','has','had','from','but'\n]);\n\nconst wordFreq = {};\ntextOnly.split(/\\s+/).forEach(word => {\n  const clean = word.replace(/[^a-záéíóúñü]/g, '');\n  if (clean.length > 3 && !stopWords.has(clean)) {\n    wordFreq[clean] = (wordFreq[clean] || 0) + 1;\n  }\n});\n\nconst topKeywords = Object.entries(wordFreq)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 5)\n  .map(([word]) => word);\n\nconst guardar = $('Parser de Comando').first().json.guardar;\nconst chatId = $('Parser de Comando').first().json.chatId;\nconst fecha = new Date().toISOString().split('T')[0];\n\nconst reporte = `📊 *REPORTE DE AUDITORÍA WEB*\\n━━━━━━━━━━━━━━━━━━━━━━━━\\n🌐 *URL:* ${url}\\n📝 *Título:* ${titulo}\\n\\n📐 *Estructura de Encabezados:*\\n   H1: ${h1} | H2: ${h2} | H3: ${h3}\\n\\n🔗 *Total de Enlaces:* ${enlaces}\\n\\n🏷️ *Top 5 Palabras Clave:*\\n${topKeywords.join(', ')}\\n\\n📅 Fecha: ${fecha}`;\n\nreturn [{\n  json: {\n    tipo: 'estatico',\n    url, titulo, descripcion,\n    h1, h2, h3, enlaces,\n    palabras_clave: topKeywords.join(', '),\n    reporte, guardar, chatId, fecha\n  }\n}];"
+      },
+      "id": "analisis-html",
+      "name": "Analisis HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Construir URL de búsqueda para Mercado Libre\nconst base = $input.first().json.url;\nconst query = $input.first().json.buscar.replace(/\\s+/g, '-');\n\nlet searchUrl;\nif (base.includes('mercadolibre')) {\n  // Extraer dominio del país\n  const domainMatch = base.match(/https?:\\/\\/[^/]+/);\n  const domain = domainMatch ? domainMatch[0] : base;\n  searchUrl = `https://listado.${domain.replace('https://www.', '').replace('https://', '')}/${query}`;\n} else {\n  searchUrl = `${base}/search?q=${encodeURIComponent($input.first().json.buscar)}`;\n}\n\nreturn [{\n  json: { ...$input.first().json, searchUrl }\n}];"
+      },
+      "id": "construir-url-busqueda",
+      "name": "Construir URL Busqueda",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 500]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.searchUrl }}",
+        "options": {
+          "timeout": 20000,
+          "response": { "response": { "responseFormat": "text" } }
+        }
+      },
+      "id": "http-get-dinamico",
+      "name": "HTTP GET Dinamico",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.data || $json.body }}",
+        "options": {
+          "systemMessage": "Eres un extractor de datos de e-commerce. Se te proporcionará el HTML de una página de resultados de búsqueda. Extrae TODOS los productos visibles y devuélvelos como un array JSON. Cada objeto debe tener:\n- \"titulo\": nombre del producto\n- \"precio\": precio numérico (sin símbolos de moneda, solo dígitos)\n- \"moneda\": código de moneda (ej: \"COP\", \"MXN\", \"USD\")\n- \"enlace\": URL completa del producto\n- \"vendedor\": nombre del vendedor si está disponible, sino \"N/A\"\n\nResponde ÚNICAMENTE con el array JSON, sin texto adicional ni markdown."
+        }
+      },
+      "id": "ai-scraper",
+      "name": "AI Scraper Semantico",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [1250, 500],
+      "credentials": {
+        "openAiApi": {
+          "id": "OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const llmResponse = $input.first().json.message?.content\n  || $input.first().json.text\n  || $input.first().json.output\n  || '';\n\nlet productos = [];\ntry {\n  const cleaned = llmResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  productos = JSON.parse(cleaned);\n} catch (e) {\n  return [{\n    json: {\n      error: true,\n      mensaje: '❌ La IA no pudo extraer productos. Intenta con otro producto o URL.',\n      chatId: $('Parser de Comando').first().json.chatId\n    }\n  }];\n}\n\nconst precios = productos\n  .map(p => parseFloat(p.precio))\n  .filter(p => !isNaN(p) && p > 0);\n\nconst precioPromedio = precios.length\n  ? Math.round(precios.reduce((a, b) => a + b, 0) / precios.length)\n  : 0;\nconst masBarato = precios.length ? Math.min(...precios) : 0;\nconst masCaro = precios.length ? Math.max(...precios) : 0;\n\nconst query = $('Parser de Comando').first().json.buscar;\nconst url = $('Parser de Comando').first().json.url;\nconst guardar = $('Parser de Comando').first().json.guardar;\nconst chatId = $('Parser de Comando').first().json.chatId;\nconst fecha = new Date().toISOString().split('T')[0];\n\nconst reporte = `🛒 *REPORTE DE PRODUCTOS*\\n━━━━━━━━━━━━━━━━━━━━━━━━\\n🔎 *Búsqueda:* ${query}\\n🌐 *Fuente:* ${url}\\n\\n💰 *Precio Promedio:* $${precioPromedio.toLocaleString()}\\n📉 *Más Barato:* $${masBarato.toLocaleString()}\\n📈 *Más Caro:* $${masCaro.toLocaleString()}\\n📦 *Total Items:* ${productos.length}\\n\\n📅 Fecha: ${fecha}`;\n\nreturn [{\n  json: {\n    tipo: 'dinamico',\n    url, query, productos,\n    datosJson: JSON.stringify(productos),\n    precioPromedio, masBarato, masCaro,\n    totalItems: productos.length,\n    reporte, guardar, chatId, fecha\n  }\n}];"
+      },
+      "id": "procesar-respuesta-llm",
+      "name": "Procesar Respuesta LLM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 500]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            {
+              "outputIndex": 0,
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.guardar }}",
+                    "rightValue": true,
+                    "operator": { "type": "boolean", "operation": "equals" }
+                  }
+                ]
+              }
+            },
+            {
+              "outputIndex": 1,
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.guardar }}",
+                    "rightValue": false,
+                    "operator": { "type": "boolean", "operation": "equals" }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "switch-guardar-estatico",
+      "name": "Guardar Estatico?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1250, 100]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            {
+              "outputIndex": 0,
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.guardar }}",
+                    "rightValue": true,
+                    "operator": { "type": "boolean", "operation": "equals" }
+                  }
+                ]
+              }
+            },
+            {
+              "outputIndex": 1,
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.guardar }}",
+                    "rightValue": false,
+                    "operator": { "type": "boolean", "operation": "equals" }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "switch-guardar-dinamico",
+      "name": "Guardar Dinamico?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1750, 500]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Scraping_Estatico"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fecha": "={{ $json.fecha }}",
+            "URL": "={{ $json.url }}",
+            "Titulo": "={{ $json.titulo }}",
+            "Descripcion": "={{ $json.descripcion }}",
+            "Cantidad_H1": "={{ $json.h1 }}",
+            "Cantidad_H2": "={{ $json.h2 }}",
+            "Cantidad_H3": "={{ $json.h3 }}",
+            "Enlaces_Totales": "={{ $json.enlaces }}",
+            "Palabras_Clave": "={{ $json.palabras_clave }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-guardar-estatico",
+      "name": "Sheets Guardar Estatico",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1500, 0],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Scraping_Dinamico"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fecha": "={{ $json.fecha }}",
+            "URL_Origen": "={{ $json.url }}",
+            "Query_buscado": "={{ $json.query }}",
+            "Datos_json": "={{ $json.datosJson }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-guardar-dinamico",
+      "name": "Sheets Guardar Dinamico",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2000, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.reporte }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-reporte-estatico",
+      "name": "Telegram Reporte Estatico",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1750, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.reporte }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-reporte-estatico-noguardar",
+      "name": "Telegram Reporte Estatico (No Guardar)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1500, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.reporte }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-reporte-dinamico",
+      "name": "Telegram Reporte Dinamico",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2250, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.reporte }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-reporte-dinamico-noguardar",
+      "name": "Telegram Reporte Dinamico (No Guardar)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2000, 600],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "📊 Ver análisis completo en el dashboard:\nhttp://localhost:8501",
+        "additionalFields": {}
+      },
+      "id": "telegram-link-estatico",
+      "name": "Telegram Link Estatico",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2000, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "📊 Ver análisis completo en el dashboard:\nhttp://localhost:8501",
+        "additionalFields": {}
+      },
+      "id": "telegram-link-estatico-noguardar",
+      "name": "Telegram Link Estatico (No Guardar)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1750, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "📊 Ver análisis completo en el dashboard:\nhttp://localhost:8501",
+        "additionalFields": {}
+      },
+      "id": "telegram-link-dinamico",
+      "name": "Telegram Link Dinamico",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2500, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "📊 Ver análisis completo en el dashboard:\nhttp://localhost:8501",
+        "additionalFields": {}
+      },
+      "id": "telegram-link-dinamico-noguardar",
+      "name": "Telegram Link Dinamico (No Guardar)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2250, 600],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId || $('Parser de Comando').first().json.chatId }}",
+        "text": "={{ $json.mensaje || '❌ Ocurrió un error procesando tu solicitud.' }}",
+        "additionalFields": {}
+      },
+      "id": "telegram-error",
+      "name": "Telegram Error",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [750, 700],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [{ "node": "Parser de Comando", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parser de Comando": {
+      "main": [
+        [{ "node": "Switch Tipo", "type": "main", "index": 0 }]
+      ]
+    },
+    "Switch Tipo": {
+      "main": [
+        [{ "node": "HTTP GET Estatico", "type": "main", "index": 0 }],
+        [{ "node": "Construir URL Busqueda", "type": "main", "index": 0 }],
+        [{ "node": "Telegram Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP GET Estatico": {
+      "main": [
+        [{ "node": "Analisis HTML", "type": "main", "index": 0 }]
+      ]
+    },
+    "Analisis HTML": {
+      "main": [
+        [{ "node": "Guardar Estatico?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Guardar Estatico?": {
+      "main": [
+        [{ "node": "Sheets Guardar Estatico", "type": "main", "index": 0 }],
+        [{ "node": "Telegram Reporte Estatico (No Guardar)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Guardar Estatico": {
+      "main": [
+        [{ "node": "Telegram Reporte Estatico", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Reporte Estatico": {
+      "main": [
+        [{ "node": "Telegram Link Estatico", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Reporte Estatico (No Guardar)": {
+      "main": [
+        [{ "node": "Telegram Link Estatico (No Guardar)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Construir URL Busqueda": {
+      "main": [
+        [{ "node": "HTTP GET Dinamico", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP GET Dinamico": {
+      "main": [
+        [{ "node": "AI Scraper Semantico", "type": "main", "index": 0 }]
+      ]
+    },
+    "AI Scraper Semantico": {
+      "main": [
+        [{ "node": "Procesar Respuesta LLM", "type": "main", "index": 0 }]
+      ]
+    },
+    "Procesar Respuesta LLM": {
+      "main": [
+        [{ "node": "Guardar Dinamico?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Guardar Dinamico?": {
+      "main": [
+        [{ "node": "Sheets Guardar Dinamico", "type": "main", "index": 0 }],
+        [{ "node": "Telegram Reporte Dinamico (No Guardar)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets Guardar Dinamico": {
+      "main": [
+        [{ "node": "Telegram Reporte Dinamico", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Reporte Dinamico": {
+      "main": [
+        [{ "node": "Telegram Link Dinamico", "type": "main", "index": 0 }]
+      ]
+    },
+    "Telegram Reporte Dinamico (No Guardar)": {
+      "main": [
+        [{ "node": "Telegram Link Dinamico (No Guardar)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "pinData": {}
+}

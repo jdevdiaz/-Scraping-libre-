@@ -76,5 +76,7 @@ __pycache__/
 # Credenciales de Google (Streamlit)
 # ==============================
 streamlit_app/credentials/
-*.json
+
+# Ignorar JSONs de credenciales pero permitir el workflow de n8n y datos de ejemplo
+!n8n/*.json
 !streamlit_app/.env.example
