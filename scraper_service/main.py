@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from playwright.async_api import async_playwright, Browser, BrowserContext
+from playwright_stealth import Stealth
 
 # ─── Configuración ───────────────────────────────────────────────────────────
 
@@ -77,35 +78,29 @@ class ScrapeResponse(BaseModel):
     titulo: str
     success: bool
     error: str = ""
+    productos: list = []
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async def create_stealth_context() -> BrowserContext:
     """Crea un contexto de navegador con configuración anti-detección."""
+    # Obtenemos el UA real del navegador
+    temp_page = await browser_instance.new_page()
+    real_ua = await temp_page.evaluate("navigator.userAgent")
+    await temp_page.close()
+    
+    # Limpiamos la palabra "HeadlessChrome" por "Chrome" para no levantar sospechas
+    stealth_ua = real_ua.replace("HeadlessChrome", "Chrome")
+
     context = await browser_instance.new_context(
         viewport={"width": 1366, "height": 768},
-        user_agent=(
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-        ),
+        user_agent=stealth_ua,
         locale="es-CO",
         timezone_id="America/Bogota",
         geolocation={"latitude": 4.711, "longitude": -74.0721},
         permissions=["geolocation"],
     )
-
-    await context.add_init_script("""
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        Object.defineProperty(navigator, 'languages', { get: () => ['es-CO', 'es', 'en'] });
-        window.chrome = { runtime: {} };
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters) =>
-            parameters.name === 'notifications'
-                ? Promise.resolve({ state: Notification.permission })
-                : originalQuery(parameters);
-    """)
     return context
 
 
@@ -124,18 +119,28 @@ async def auto_scroll(page, max_attempts: int = 8) -> None:
     await asyncio.sleep(0.5)
 
 
+def clean_html(html: str) -> str:
+    """Elimina etiquetas pesadas e inútiles para la IA reduciendo el tamaño drásticamente."""
+    import re
+    # Eliminar scripts, styles, svgs, noscripts, iframes
+    cleaned = re.sub(r'<(script|style|svg|noscript|iframe|path)[^>]*>.*?</\1>', '', html, flags=re.IGNORECASE | re.DOTALL)
+    # Eliminar comentarios HTML
+    cleaned = re.sub(r'<!--.*?-->', '', cleaned, flags=re.DOTALL)
+    return cleaned
+
+
 def build_search_url(base_url: str, query: str) -> str:
     """Construye la URL de búsqueda según el sitio."""
     q = query.strip().replace(" ", "-")
     q_encoded = query.strip().replace(" ", "+")
 
     if "mercadolibre" in base_url:
-        # MercadoLibre: https://listado.mercadolibre.com.co/query
         import re
         domain_match = re.match(r"https?://(?:www\.)?([^/]+)", base_url)
         if domain_match:
             domain = domain_match.group(1)
-            # listado.mercadolibre.com.co/query
+            if domain.startswith("listado."):
+                return f"https://{domain}/{q}"
             return f"https://listado.{domain}/{q}"
         return f"{base_url}/{q}"
 
@@ -166,6 +171,19 @@ async def scrape_page(req: ScrapeRequest):
     try:
         context = await create_stealth_context()
         page = await context.new_page()
+        
+        # Aplicar el modo stealth
+        await Stealth().apply_stealth_async(page)
+
+        # Warmup de cookies: visitar el dominio raíz primero
+        try:
+            from urllib.parse import urlparse
+            parsed_uri = urlparse(req.url)
+            base_domain = '{uri.scheme}://{uri.netloc}'.format(uri=parsed_uri)
+            await page.goto(base_domain, wait_until="commit", timeout=10000)
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+        except Exception:
+            pass
 
         await page.goto(req.url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
         await asyncio.sleep(random.uniform(1.0, 2.0))
@@ -176,6 +194,8 @@ async def scrape_page(req: ScrapeRequest):
         html = await page.content()
         title = await page.title()
         final_url = page.url
+
+        html = clean_html(html)
 
         return ScrapeResponse(
             html=html,
@@ -213,6 +233,19 @@ async def search_products(req: ScrapeRequest):
         search_url = build_search_url(req.url, req.buscar)
         context = await create_stealth_context()
         page = await context.new_page()
+        
+        # Aplicar el modo stealth
+        await Stealth().apply_stealth_async(page)
+
+        # Warmup de cookies: visitar el dominio raíz primero
+        try:
+            from urllib.parse import urlparse
+            parsed_uri = urlparse(req.url)
+            base_domain = '{uri.scheme}://{uri.netloc}'.format(uri=parsed_uri)
+            await page.goto(base_domain, wait_until="commit", timeout=10000)
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+        except Exception:
+            pass
 
         await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
         await asyncio.sleep(random.uniform(2.0, 4.0))
@@ -239,12 +272,43 @@ async def search_products(req: ScrapeRequest):
         title = await page.title()
         final_url = page.url
 
+        # Detección básica de bloqueos por CAPTCHA o Cloudflare
+        title_lower = title.lower()
+        if "captcha" in title_lower or "just a moment" in title_lower or "robot" in title_lower or "security" in title_lower:
+            raise Exception(f"Bloqueo detectado (CAPTCHA/Cloudflare). Título de la página: {title}")
+
+        # Extracción local inteligente para evitar gastar tokens de IA
+        productos_extraidos = []
+        if "mercadolibre" in req.url.lower() or "mercadolibre" in final_url.lower():
+            items = await page.query_selector_all(".ui-search-layout__item, .ui-search-result__wrapper")
+            for item in items[:50]:
+                title_el = await item.query_selector("h2, .poly-component__title, .ui-search-item__title")
+                price_el = await item.query_selector(".andes-money-amount__fraction")
+                link_el = await item.query_selector("a")
+                
+                if title_el and price_el and link_el:
+                    try:
+                        p_title = await title_el.inner_text()
+                        p_price_text = await price_el.inner_text()
+                        p_price = int(p_price_text.replace(".", "").replace(",", ""))
+                        p_link = await link_el.get_attribute("href")
+                        productos_extraidos.append({
+                            "titulo": p_title.strip(),
+                            "precio": p_price,
+                            "link": p_link
+                        })
+                    except Exception:
+                        pass
+
+        html = clean_html(html)
+
         return ScrapeResponse(
             html=html,
             url_final=final_url,
             longitud=len(html),
             titulo=title,
             success=True,
+            productos=productos_extraidos,
         )
 
     except Exception as e:
