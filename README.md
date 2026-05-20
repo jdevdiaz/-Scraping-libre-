@@ -119,29 +119,31 @@ python -m src.services.extractor
 
 ---
 
-## Pipeline Hibrido: Telegram + n8n + Google Sheets + Streamlit
+## Pipeline Hibrido v5: Telegram + n8n + Playwright + Groq + Streamlit
 
-Este proyecto ahora incluye un **pipeline de automatizacion completo** que extiende el scraper base con una capa de orquestacion (n8n Cloud), interfaz de usuario (Telegram Bot) y dashboard analitico (Streamlit).
+Pipeline de automatizacion completo con **scraping dinamico via navegador real** (Playwright) y **extraccion inteligente con IA** (Groq LLM).
 
-### Arquitectura Extendida
+### Arquitectura
 
 ```text
 -Scraping-libre-/
-├── config/                    # Configuraciones del scraper original
-├── src/                       # Codigo fuente del scraper (Playwright)
-├── docs/
-│   ├── architecture.md
-│   ├── dev_log.md
-│   ├── scraping_notes.md
-│   └── n8n_cloud_guide.md     # [NUEVO] Guia de nodos para n8n Cloud
-├── streamlit_app/             # [NUEVO] Dashboard de analitica visual
-│   ├── app.py                 # Aplicacion Streamlit principal
+├── scraper_service/           # Microservicio Playwright (FastAPI)
+│   ├── main.py                # Servidor con endpoints /scrape y /search
+│   ├── requirements.txt       # Dependencias del microservicio
+│   └── start.sh               # Script de inicio
+├── streamlit_app/             # Dashboard de analitica visual
+│   ├── app.py                 # Aplicacion Streamlit v2
 │   ├── requirements.txt       # Dependencias Python del dashboard
 │   ├── .env.example           # Variables de entorno de ejemplo
 │   └── credentials/           # (gitignored) Credenciales de Google
-├── main.py                    # Punto de entrada del scraper original
-├── requirements.txt           # Dependencias del scraper
-└── .gitignore
+├── n8n/
+│   └── workflow_scraping_pipeline.json  # Workflow n8n v5
+├── docs/
+│   ├── n8n_cloud_guide.md
+│   └── setup_playwright_service.md     # Guia de instalacion completa
+├── src/                       # Codigo fuente del scraper original
+├── config/                    # Configuraciones del scraper original
+└── main.py                    # Punto de entrada del scraper original
 ```
 
 ### Flujo de Datos
@@ -151,11 +153,27 @@ Usuario (Telegram)
     │  /buscar [tipo] [url] [producto] [guardar]
     ▼
 n8n Cloud (Webhook)
-    │  Parser → Switch → Scraping/LLM → Reporte
-    ▼
-Google Sheets
-    │  Scraping_Estatico / Scraping_Dinamico
-    ▼
+    │  Parser → Switch
+    │
+    ├── ESTATICO: HTTP GET → Analisis HTML → Sheets → Telegram
+    │
+    ├── DINAMICO:
+    │       n8n Cloud
+    │         │ HTTP POST (URL + producto)
+    │         ▼
+    │       ngrok (tunel publico)
+    │         │
+    │         ▼
+    │       Microservicio Playwright (MX Linux local)
+    │         │ Chromium real + stealth + scroll
+    │         ▼
+    │       n8n Cloud (recibe HTML)
+    │         │ Groq LLM extrae productos como JSON
+    │         ▼
+    │       Google Sheets + Telegram
+    │
+    └── REPORTE: Lee Sheets → Genera resumen → Telegram
+         ▼
 Streamlit Dashboard (MX Linux)
     │  Visualizacion interactiva con Plotly
     ▼
@@ -166,26 +184,44 @@ Usuario
 
 | Comando | Descripcion |
 |---------|------------|
+| `/start` | Mensaje de bienvenida con ayuda |
 | `/buscar estatico [URL]` | Auditoria SEO (no guarda) |
 | `/buscar estatico [URL] guardar` | Auditoria SEO + guarda en Sheets |
-| `/buscar dinamico [URL] [producto]` | Scraping e-commerce (no guarda) |
-| `/buscar dinamico [URL] [producto] guardar` | Scraping e-commerce + guarda en Sheets |
+| `/buscar dinamico [URL] [producto]` | Scraping con Playwright + Groq (no guarda) |
+| `/buscar dinamico [URL] [producto] guardar` | Scraping + guarda en Sheets |
+| `/reporte` | Resumen del historico guardado |
 
-### Configurar el Dashboard Streamlit
+### Inicio Rapido
 
+**Terminal 1 — Microservicio Playwright:**
 ```bash
-# 1. Instalar dependencias
+cd scraper_service
+pip install -r requirements.txt
+playwright install chromium
+./start.sh
+```
+
+**Terminal 2 — ngrok (exponer al internet):**
+```bash
+ngrok http 8000
+# Copiar la URL https://xxx.ngrok-free.app
+```
+
+**Terminal 3 — Dashboard Streamlit:**
+```bash
 cd streamlit_app
 pip install -r requirements.txt
-
-# 2. Configurar credenciales de Google
-cp .env.example .env
-# Editar .env con la ruta a tu service account JSON
-
-# 3. Ejecutar
+cp .env.example .env  # Editar con tu config
 streamlit run app.py
 ```
 
-### Documentacion de n8n
+**En n8n Cloud:**
+1. Importar `n8n/workflow_scraping_pipeline.json`
+2. Configurar credenciales (Telegram, Google Sheets, Groq)
+3. Editar nodo "Playwright Scraper" → poner tu URL de ngrok
+4. Activar workflow
 
-Ver la guia completa de nodos en [`docs/n8n_cloud_guide.md`](docs/n8n_cloud_guide.md).
+### Documentacion
+
+- Guia de nodos n8n: [`docs/n8n_cloud_guide.md`](docs/n8n_cloud_guide.md)
+- Setup Playwright + ngrok: [`docs/setup_playwright_service.md`](docs/setup_playwright_service.md)

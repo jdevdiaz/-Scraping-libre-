@@ -1,17 +1,17 @@
 {
-  "id": "scraping-pipeline-v4",
+  "id": "scraping-pipeline-v5",
   "meta": {
-    "instanceId": "scraping-pipeline-hibrido-v4"
+    "instanceId": "scraping-pipeline-hibrido-v5"
   },
-  "name": "Pipeline Scraping Hibrido v4",
+  "name": "Pipeline Scraping v5 (Playwright + Groq)",
   "tags": [],
   "nodes": [
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "id": "node-001",
       "name": "Telegram Trigger",
       "type": "n8n-nodes-base.telegramTrigger",
       "position": [0, 300],
-      "webhookId": "a1b2c3d4-0001-4000-8000-aaaaaaaaaaaa",
+      "webhookId": "wh-scraping-pipeline-v5",
       "parameters": {
         "updates": ["message"],
         "additionalFields": {}
@@ -25,18 +25,18 @@
       "typeVersion": 1.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000002",
+      "id": "node-002",
       "name": "Parser de Comando",
       "type": "n8n-nodes-base.code",
       "position": [280, 300],
       "parameters": {
-        "jsCode": "const text = $input.first().json.message.text || '';\nconst parts = text.trim().split(/\\s+/);\nconst chatId = String($input.first().json.message.chat.id || '');\nconst userName = $input.first().json.message.from.first_name || 'Usuario';\n\n// Comando /start\nif (parts[0] === '/start') {\n  return [{\n    json: {\n      tipo: 'start',\n      chatId,\n      userName,\n      mensaje: 'Hola ' + userName + '! Soy tu asistente de Web Scraping.\\n\\nComandos disponibles:\\n\\n/buscar estatico [URL] - Auditoria SEO\\n/buscar estatico [URL] guardar - Auditoria SEO + guardar\\n/buscar dinamico [URL] [producto] - Buscar productos\\n/buscar dinamico [URL] [producto] guardar - Buscar + guardar\\n/reporte - Ver resumen de datos guardados\\n/ayuda - Ver esta ayuda\\n\\nEjemplos:\\n/buscar estatico https://es.wikipedia.org\\n/buscar dinamico https://mercadolibre.com.co ram\\n/buscar dinamico https://mercadolibre.com.co iphone-15 guardar'\n    }\n  }];\n}\n\n// Comando /ayuda\nif (parts[0] === '/ayuda' || parts[0] === '/help') {\n  return [{\n    json: {\n      tipo: 'ayuda',\n      chatId,\n      mensaje: 'COMANDOS DISPONIBLES\\n====================\\n\\n/buscar estatico [URL]\\n  Analiza estructura HTML/SEO de una web\\n\\n/buscar estatico [URL] guardar\\n  Analiza y guarda en historico\\n\\n/buscar dinamico [URL] [producto]\\n  Busca productos en e-commerce con IA\\n\\n/buscar dinamico [URL] [producto] guardar\\n  Busca productos y guarda en historico\\n\\n/reporte\\n  Muestra resumen de todos los datos guardados\\n\\nNOTA: Si el producto tiene mas de una palabra, usa guiones: memoria-ram'\n    }\n  }];\n}\n\n// Comando /reporte\nif (parts[0] === '/reporte') {\n  return [{\n    json: { tipo: 'reporte', chatId, userName }\n  }];\n}\n\n// Comando /buscar\nif (parts.length < 3 || parts[0] !== '/buscar') {\n  return [{\n    json: {\n      tipo: 'error',\n      chatId,\n      mensaje: 'Formato invalido. Usa /ayuda para ver los comandos disponibles.'\n    }\n  }];\n}\n\nconst tipo = parts[1].toLowerCase();\nconst url = parts[2];\nlet buscar = '';\nlet guardar = false;\n\nif (tipo === 'dinamico') {\n  buscar = parts[3] || '';\n  guardar = (parts[4] || '').toLowerCase() === 'guardar';\n  buscar = buscar.replace(/-/g, ' ');\n  if (!buscar) {\n    return [{\n      json: {\n        tipo: 'error',\n        chatId,\n        mensaje: 'Para scraping dinamico necesitas indicar el producto.\\nEjemplo: /buscar dinamico https://mercadolibre.com.co ram'\n      }\n    }];\n  }\n} else if (tipo === 'estatico') {\n  guardar = (parts[3] || '').toLowerCase() === 'guardar';\n} else {\n  return [{\n    json: {\n      tipo: 'error',\n      chatId,\n      mensaje: 'Tipo no reconocido. Usa \"estatico\" o \"dinamico\".\\nEjemplo: /buscar estatico https://wikipedia.org'\n    }\n  }];\n}\n\nreturn [{\n  json: { tipo, url, buscar, guardar, chatId, userName, error: false }\n}];",
+        "jsCode": "const text = $input.first().json.message.text || '';\nconst parts = text.trim().split(/\\s+/);\nconst chatId = String($input.first().json.message.chat.id || '');\nconst userName = $input.first().json.message.from.first_name || 'Usuario';\n\n// Comando /start\nif (parts[0] === '/start') {\n  return [{\n    json: {\n      tipo: 'ayuda',\n      chatId,\n      userName,\n      mensaje: 'Hola ' + userName + '! Soy tu asistente de Web Scraping.\\n\\nComandos:\\n\\n/buscar estatico [URL]\\n  Auditoria SEO de una web\\n\\n/buscar estatico [URL] guardar\\n  Auditoria SEO + guardar en historico\\n\\n/buscar dinamico [URL] [producto]\\n  Buscar productos con IA (Playwright + Groq)\\n\\n/buscar dinamico [URL] [producto] guardar\\n  Buscar productos + guardar\\n\\n/reporte\\n  Ver resumen del historico\\n\\nEjemplos:\\n/buscar estatico https://es.wikipedia.org\\n/buscar dinamico https://mercadolibre.com.co ram\\n/buscar dinamico https://mercadolibre.com.co iphone-15 guardar\\n\\nNota: productos de varias palabras van con guion (memoria-ram)'\n    }\n  }];\n}\n\n// Comando /ayuda o /help\nif (parts[0] === '/ayuda' || parts[0] === '/help') {\n  return [{\n    json: {\n      tipo: 'ayuda',\n      chatId,\n      mensaje: 'COMANDOS DISPONIBLES\\n' + '='.repeat(25) + '\\n\\n/buscar estatico [URL]\\n/buscar estatico [URL] guardar\\n/buscar dinamico [URL] [producto]\\n/buscar dinamico [URL] [producto] guardar\\n/reporte\\n\\nProductos con varias palabras: usar guiones\\nEj: memoria-ram, iphone-15-pro'\n    }\n  }];\n}\n\n// Comando /reporte\nif (parts[0] === '/reporte') {\n  return [{ json: { tipo: 'reporte', chatId, userName } }];\n}\n\n// Comando /buscar\nif (parts.length < 3 || parts[0] !== '/buscar') {\n  return [{\n    json: {\n      tipo: 'ayuda',\n      chatId,\n      mensaje: 'Comando no reconocido. Usa /start para ver la ayuda.'\n    }\n  }];\n}\n\nconst tipo = parts[1].toLowerCase();\nconst url = parts[2];\nlet buscar = '';\nlet guardar = false;\n\nif (tipo === 'dinamico') {\n  buscar = parts[3] || '';\n  guardar = (parts[4] || '').toLowerCase() === 'guardar';\n  buscar = buscar.replace(/-/g, ' ');\n  if (!buscar) {\n    return [{\n      json: {\n        tipo: 'ayuda',\n        chatId,\n        mensaje: 'Para scraping dinamico necesitas el producto:\\n/buscar dinamico [URL] [producto]\\n\\nEjemplo:\\n/buscar dinamico https://mercadolibre.com.co ram'\n      }\n    }];\n  }\n} else if (tipo === 'estatico') {\n  guardar = (parts[3] || '').toLowerCase() === 'guardar';\n} else {\n  return [{\n    json: {\n      tipo: 'ayuda',\n      chatId,\n      mensaje: 'Tipo no valido. Usa \"estatico\" o \"dinamico\".'\n    }\n  }];\n}\n\nreturn [{\n  json: { tipo, url, buscar, guardar, chatId, userName, error: false }\n}];",
         "mode": "runOnceForAllItems"
       },
       "typeVersion": 2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000003",
+      "id": "node-003",
       "name": "Switch Tipo",
       "type": "n8n-nodes-base.switch",
       "position": [540, 300],
@@ -46,142 +46,74 @@
             {
               "outputKey": "estatico",
               "conditions": {
-                "options": {
-                  "version": 2,
-                  "leftValue": "",
-                  "caseSensitive": true,
-                  "typeValidation": "strict"
-                },
+                "options": { "version": 2, "leftValue": "", "caseSensitive": true, "typeValidation": "strict" },
                 "combinator": "and",
-                "conditions": [
-                  {
-                    "id": "cond-0001",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    },
-                    "leftValue": "={{ $json.tipo }}",
-                    "rightValue": "estatico"
-                  }
-                ]
+                "conditions": [{ "id": "c01", "operator": { "type": "string", "operation": "equals" }, "leftValue": "={{ $json.tipo }}", "rightValue": "estatico" }]
               },
               "renameOutput": true
             },
             {
               "outputKey": "dinamico",
               "conditions": {
-                "options": {
-                  "version": 2,
-                  "leftValue": "",
-                  "caseSensitive": true,
-                  "typeValidation": "strict"
-                },
+                "options": { "version": 2, "leftValue": "", "caseSensitive": true, "typeValidation": "strict" },
                 "combinator": "and",
-                "conditions": [
-                  {
-                    "id": "cond-0002",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    },
-                    "leftValue": "={{ $json.tipo }}",
-                    "rightValue": "dinamico"
-                  }
-                ]
+                "conditions": [{ "id": "c02", "operator": { "type": "string", "operation": "equals" }, "leftValue": "={{ $json.tipo }}", "rightValue": "dinamico" }]
               },
               "renameOutput": true
             },
             {
               "outputKey": "reporte",
               "conditions": {
-                "options": {
-                  "version": 2,
-                  "leftValue": "",
-                  "caseSensitive": true,
-                  "typeValidation": "strict"
-                },
+                "options": { "version": 2, "leftValue": "", "caseSensitive": true, "typeValidation": "strict" },
                 "combinator": "and",
-                "conditions": [
-                  {
-                    "id": "cond-0003",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    },
-                    "leftValue": "={{ $json.tipo }}",
-                    "rightValue": "reporte"
-                  }
-                ]
+                "conditions": [{ "id": "c03", "operator": { "type": "string", "operation": "equals" }, "leftValue": "={{ $json.tipo }}", "rightValue": "reporte" }]
               },
               "renameOutput": true
             }
           ]
         },
-        "options": {
-          "fallbackOutput": "extra"
-        }
+        "options": { "fallbackOutput": "extra" }
       },
       "typeVersion": 3.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000004",
+      "id": "node-010",
       "name": "HTTP GET Estatico",
       "type": "n8n-nodes-base.httpRequest",
       "position": [820, 60],
       "parameters": {
         "url": "={{ $('Parser de Comando').item.json.url }}",
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "text"
-            }
-          }
-        }
+        "options": { "response": { "response": { "responseFormat": "text" } } }
       },
       "typeVersion": 4.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000005",
+      "id": "node-011",
       "name": "Analisis HTML",
       "type": "n8n-nodes-base.code",
       "position": [1080, 60],
       "parameters": {
-        "jsCode": "const html = $input.first().json.data || $input.first().json.body || '';\nconst url = $('Parser de Comando').item.json.url;\nconst userName = $('Parser de Comando').item.json.userName;\n\nconst titleMatch = html.match(/<title[^>]*>(.*?)<\\/title>/is);\nconst titulo = titleMatch ? titleMatch[1].trim() : 'Sin titulo';\n\nconst descMatch = html.match(/<meta\\s+name=[\"']description[\"']\\s+content=[\"'](.*?)[\"']/is);\nconst descripcion = descMatch ? descMatch[1].trim() : 'Sin descripcion';\n\nconst countTag = (tag) => (html.match(new RegExp('<' + tag + '[\\\\s>]', 'gi')) || []).length;\nconst h1 = countTag('h1');\nconst h2 = countTag('h2');\nconst h3 = countTag('h3');\nconst enlaces = (html.match(/<a\\s/gi) || []).length;\n\nconst textOnly = html\n  .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n  .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .toLowerCase();\n\nconst stopWords = new Set(['de','la','el','en','y','a','los','del','las','un','por','con','no','una','su','para','es','al','que','se','lo','como','mas','o','pero','sus','le','ya','the','and','of','to','in','is','it','for','on','with','as','at','this','be','are','an','was','or','not','has','had','from','but']);\n\nconst wordFreq = {};\ntextOnly.split(/\\s+/).forEach(word => {\n  const clean = word.replace(/[^a-z\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00fc]/g, '');\n  if (clean.length > 3 && !stopWords.has(clean)) {\n    wordFreq[clean] = (wordFreq[clean] || 0) + 1;\n  }\n});\n\nconst topKeywords = Object.entries(wordFreq)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 10)\n  .map(([word, count]) => word + ' (' + count + ')');\n\nconst guardar = $('Parser de Comando').item.json.guardar;\nconst chatId = $('Parser de Comando').item.json.chatId;\nconst fecha = new Date().toISOString().split('T')[0];\n\nconst saveLabel = guardar ? '\\nGuardado en historico' : '\\nDatos NO guardados (agrega \"guardar\" al comando)';\n\nconst reporte = 'AUDITORIA WEB\\n' + '='.repeat(30) + '\\n\\nURL: ' + url + '\\nTitulo: ' + titulo + '\\n\\nEstructura de Encabezados:\\n  H1: ' + h1 + '\\n  H2: ' + h2 + '\\n  H3: ' + h3 + '\\n\\nTotal de Enlaces: ' + enlaces + '\\n\\nTop 10 Palabras Clave:\\n  ' + topKeywords.join('\\n  ') + '\\n\\nFecha: ' + fecha + saveLabel;\n\nreturn [{\n  json: {\n    tipo: 'estatico', url, titulo, descripcion,\n    h1, h2, h3, enlaces,\n    palabras_clave: topKeywords.map(k => k.split(' (')[0]).join(', '),\n    reporte, guardar, chatId, fecha, userName\n  }\n}];",
+        "jsCode": "const html = $input.first().json.data || $input.first().json.body || '';\nconst url = $('Parser de Comando').item.json.url;\nconst userName = $('Parser de Comando').item.json.userName;\n\nconst titleMatch = html.match(/<title[^>]*>(.*?)<\\/title>/is);\nconst titulo = titleMatch ? titleMatch[1].trim() : 'Sin titulo';\n\nconst descMatch = html.match(/<meta\\s+name=[\"']description[\"']\\s+content=[\"'](.*?)[\"']/is);\nconst descripcion = descMatch ? descMatch[1].trim() : 'Sin descripcion';\n\nconst countTag = (tag) => (html.match(new RegExp('<' + tag + '[\\\\s>]', 'gi')) || []).length;\nconst h1 = countTag('h1');\nconst h2 = countTag('h2');\nconst h3 = countTag('h3');\nconst enlaces = (html.match(/<a\\s/gi) || []).length;\n\nconst textOnly = html\n  .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n  .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .toLowerCase();\n\nconst stopWords = new Set(['de','la','el','en','y','a','los','del','las','un','por','con','no','una','su','para','es','al','que','se','lo','como','mas','o','pero','sus','le','ya','the','and','of','to','in','is','it','for','on','with','as','at','this','be','are','an','was','or','not','has','had','from','but']);\n\nconst wordFreq = {};\ntextOnly.split(/\\s+/).forEach(word => {\n  const clean = word.replace(/[^a-z\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00fc]/g, '');\n  if (clean.length > 3 && !stopWords.has(clean)) {\n    wordFreq[clean] = (wordFreq[clean] || 0) + 1;\n  }\n});\n\nconst topKeywords = Object.entries(wordFreq)\n  .sort((a, b) => b[1] - a[1])\n  .slice(0, 10)\n  .map(([word, count]) => word + ' (' + count + ')');\n\nconst guardar = $('Parser de Comando').item.json.guardar;\nconst chatId = $('Parser de Comando').item.json.chatId;\nconst fecha = new Date().toISOString().split('T')[0];\n\nconst saveLabel = guardar ? '\\n\\nGuardado en historico' : '\\n\\nDatos efimeros (agrega \"guardar\" al comando para persistir)';\n\nconst reporte = 'AUDITORIA WEB\\n' + '='.repeat(30) + '\\n\\nURL: ' + url + '\\nTitulo: ' + titulo + '\\n\\nEstructura de Encabezados:\\n  H1: ' + h1 + ' | H2: ' + h2 + ' | H3: ' + h3 + '\\n\\nTotal de Enlaces: ' + enlaces + '\\n\\nTop 10 Palabras Clave:\\n  ' + topKeywords.join('\\n  ') + '\\n\\nFecha: ' + fecha + saveLabel;\n\nreturn [{\n  json: {\n    tipo: 'estatico', url, titulo, descripcion,\n    h1, h2, h3, enlaces,\n    palabras_clave: topKeywords.map(k => k.split(' (')[0]).join(', '),\n    reporte, guardar, chatId, fecha, userName\n  }\n}];",
         "mode": "runOnceForAllItems"
       },
       "typeVersion": 2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000006",
+      "id": "node-012",
       "name": "Guardar Estatico?",
       "type": "n8n-nodes-base.if",
       "position": [1340, 60],
       "parameters": {
         "conditions": {
-          "options": {
-            "version": 2,
-            "leftValue": "",
-            "caseSensitive": true,
-            "typeValidation": "loose"
-          },
+          "options": { "version": 2, "leftValue": "", "caseSensitive": true, "typeValidation": "loose" },
           "combinator": "and",
-          "conditions": [
-            {
-              "id": "cond-0010",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              },
-              "leftValue": "={{ String($json.guardar) }}",
-              "rightValue": "true"
-            }
-          ]
+          "conditions": [{ "id": "c10", "operator": { "type": "string", "operation": "equals" }, "leftValue": "={{ String($json.guardar) }}", "rightValue": "true" }]
         }
       },
       "typeVersion": 2.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000007",
+      "id": "node-013",
       "name": "Sheets Guardar Estatico",
       "type": "n8n-nodes-base.googleSheets",
       "position": [1600, -20],
@@ -216,161 +148,111 @@
           "convertFieldsToString": true
         },
         "options": {},
-        "sheetName": {
-          "__rl": true,
-          "mode": "byName",
-          "value": "Scraping_Estatico"
-        },
-        "documentId": {
-          "__rl": true,
-          "mode": "byUrl",
-          "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit"
-        }
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Scraping_Estatico" },
+        "documentId": { "__rl": true, "mode": "byUrl", "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit" }
       },
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "" } },
       "typeVersion": 4.5
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000008",
+      "id": "node-014",
       "name": "TG Reporte Estatico",
       "type": "n8n-nodes-base.telegram",
       "position": [1860, -20],
       "parameters": {
         "chatId": "={{ $('Analisis HTML').item.json.chatId }}",
         "text": "={{ $('Analisis HTML').item.json.reporte }}",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "additionalFields": { "appendAttribution": false }
       },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
       "typeVersion": 1.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000009",
+      "id": "node-015",
       "name": "TG Link Estatico",
       "type": "n8n-nodes-base.telegram",
       "position": [2120, -20],
       "parameters": {
         "chatId": "={{ $('Analisis HTML').item.json.chatId }}",
-        "text": "Dashboard disponible en:\nhttp://localhost:8501\n\nSelecciona Scraping Estatico (SEO) para ver el analisis.",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "text": "Dashboard: http://localhost:8501\nSelecciona 'Scraping Estatico (SEO)'",
+        "additionalFields": { "appendAttribution": false }
       },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
       "typeVersion": 1.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000010",
+      "id": "node-016",
       "name": "TG Reporte Estatico NG",
       "type": "n8n-nodes-base.telegram",
       "position": [1600, 160],
       "parameters": {
         "chatId": "={{ $('Analisis HTML').item.json.chatId }}",
         "text": "={{ $('Analisis HTML').item.json.reporte }}",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "additionalFields": { "appendAttribution": false }
       },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
       "typeVersion": 1.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000011",
+      "id": "node-017",
       "name": "TG Link Estatico NG",
       "type": "n8n-nodes-base.telegram",
       "position": [1860, 160],
       "parameters": {
         "chatId": "={{ $('Analisis HTML').item.json.chatId }}",
-        "text": "Dashboard disponible en:\nhttp://localhost:8501\n\nDatos NO guardados. Para guardar, agrega \"guardar\" al final del comando.",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "text": "Dashboard: http://localhost:8501\n(Datos no guardados - agrega 'guardar' al comando)",
+        "additionalFields": { "appendAttribution": false }
       },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
       "typeVersion": 1.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000020",
-      "name": "Construir URL Busqueda",
-      "type": "n8n-nodes-base.code",
+      "id": "node-020",
+      "name": "Playwright Scraper",
+      "type": "n8n-nodes-base.httpRequest",
       "position": [820, 400],
       "parameters": {
-        "jsCode": "const data = $input.first().json;\nconst base = data.url;\nconst query = data.buscar.replace(/\\s+/g, '-');\n\nlet searchUrl;\nif (base.includes('mercadolibre')) {\n  const domainMatch = base.match(/https?:\\/\\/[^/]+/);\n  const domain = domainMatch ? domainMatch[0] : base;\n  searchUrl = 'https://listado.' + domain.replace('https://www.', '').replace('https://', '') + '/' + query;\n} else if (base.includes('amazon')) {\n  searchUrl = base + '/s?k=' + encodeURIComponent(data.buscar);\n} else {\n  searchUrl = base + '/search?q=' + encodeURIComponent(data.buscar);\n}\n\nreturn [{ json: { ...data, searchUrl } }];",
-        "mode": "runOnceForAllItems"
-      },
-      "typeVersion": 2
-    },
-    {
-      "id": "a1b2c3d4-0001-4000-8000-000000000021",
-      "name": "HTTP GET Dinamico",
-      "type": "n8n-nodes-base.httpRequest",
-      "position": [1080, 400],
-      "parameters": {
-        "url": "={{ $json.searchUrl }}",
+        "method": "POST",
+        "url": "={{ $json.playwright_url || 'https://TU-URL-NGROK.ngrok-free.app' }}/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $('Parser de Comando').item.json.url }}\",\n  \"buscar\": \"{{ $('Parser de Comando').item.json.buscar }}\",\n  \"scroll\": true,\n  \"max_scroll\": 8\n}",
         "options": {
-          "response": {
-            "response": {
-              "responseFormat": "text"
-            }
-          }
+          "timeout": 60000
         }
       },
       "typeVersion": 4.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000022",
-      "name": "Preparar Prompt IA",
+      "id": "node-021",
+      "name": "Verificar Scraping",
       "type": "n8n-nodes-base.code",
-      "position": [1340, 400],
+      "position": [1080, 400],
       "parameters": {
-        "jsCode": "const html = $input.first().json.data || $input.first().json.body || '';\nconst truncated = html.substring(0, 30000);\nconst query = $('Parser de Comando').item.json.buscar;\n\nconst prompt = 'Extrae TODOS los productos visibles del siguiente HTML de una busqueda de \"' + query + '\". Devuelve UNICAMENTE un array JSON valido. Cada objeto debe tener exactamente estos campos:\\n- titulo: nombre del producto\\n- precio: valor numerico (sin simbolos ni puntos de miles)\\n- moneda: codigo de moneda (COP, MXN, USD, etc)\\n- enlace: URL completa del producto\\n- vendedor: nombre del vendedor o \"N/A\"\\n\\nHTML:\\n' + truncated;\n\nreturn [{ json: { ...($('Parser de Comando').item.json), prompt, htmlLength: html.length } }];",
+        "jsCode": "const resp = $input.first().json;\n\nif (!resp.success) {\n  return [{\n    json: {\n      error: true,\n      chatId: $('Parser de Comando').item.json.chatId,\n      reporte: 'Error en el scraping:\\n' + (resp.error || 'El microservicio no pudo cargar la pagina.') + '\\n\\nVerifica que:\\n1. El microservicio Playwright esta corriendo\\n2. ngrok esta activo\\n3. La URL del sitio es correcta',\n      guardar: false\n    }\n  }];\n}\n\nif (!resp.html || resp.longitud < 500) {\n  return [{\n    json: {\n      error: true,\n      chatId: $('Parser de Comando').item.json.chatId,\n      reporte: 'El scraping devolvio muy poco contenido (' + (resp.longitud || 0) + ' caracteres).\\nEl sitio puede estar bloqueando el acceso.',\n      guardar: false\n    }\n  }];\n}\n\n// Pasar HTML truncado al siguiente nodo (max 30000 chars para LLM)\nconst html = resp.html.substring(0, 30000);\nconst query = $('Parser de Comando').item.json.buscar;\nconst chatId = $('Parser de Comando').item.json.chatId;\nconst guardar = $('Parser de Comando').item.json.guardar;\nconst url = $('Parser de Comando').item.json.url;\n\nreturn [{\n  json: {\n    html,\n    htmlLength: resp.longitud,\n    urlFinal: resp.url_final,\n    tituloPage: resp.titulo,\n    query, chatId, guardar, url,\n    error: false\n  }\n}];",
         "mode": "runOnceForAllItems"
       },
       "typeVersion": 2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000023",
+      "id": "node-022",
       "name": "AI Scraper Groq",
       "type": "n8n-nodes-base.httpRequest",
-      "position": [1600, 400],
+      "position": [1340, 400],
       "parameters": {
         "method": "POST",
         "url": "https://api.groq.com/openai/v1/chat/completions",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "groqApi",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"temperature\": 0.1,\n  \"max_tokens\": 4096,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Eres un extractor de datos especializado. Responde UNICAMENTE con un array JSON valido. Sin explicaciones, sin markdown, sin texto adicional.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.prompt) }}\n    }\n  ]\n}",
-        "options": {}
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"temperature\": 0.1,\n  \"max_tokens\": 4096,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Eres un extractor de datos de e-commerce. Analiza el HTML y extrae TODOS los productos visibles. Responde UNICAMENTE con un array JSON valido (sin markdown, sin explicaciones). Cada objeto debe tener exactamente: titulo (string), precio (number sin simbolos), moneda (string: COP/MXN/USD), enlace (string: URL completa), vendedor (string o N/A).\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify('Extrae productos de esta busqueda de \"' + $json.query + '\":\\n\\n' + $json.html) }}\n    }\n  ]\n}",
+        "options": {
+          "timeout": 60000
+        }
       },
       "credentials": {
-        "httpHeaderAuth": {
+        "groqApi": {
           "id": "",
           "name": ""
         }
@@ -378,50 +260,35 @@
       "typeVersion": 4.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000024",
+      "id": "node-023",
       "name": "Procesar Respuesta LLM",
       "type": "n8n-nodes-base.code",
-      "position": [1860, 400],
+      "position": [1600, 400],
       "parameters": {
-        "jsCode": "// Obtener respuesta del LLM (compatible con HTTP Request a Groq y con Cadena LLM nativa)\nlet llmResponse = '';\nconst input = $input.first().json;\n\n// HTTP Request a Groq API\nif (input.choices && input.choices[0] && input.choices[0].message) {\n  llmResponse = input.choices[0].message.content || '';\n}\n// Cadena LLM basica de n8n\nelse if (input.response) {\n  llmResponse = input.response;\n}\nelse if (input.text) {\n  llmResponse = input.text;\n}\nelse if (input.output) {\n  llmResponse = input.output;\n}\n\nlet productos = [];\ntry {\n  const cleaned = llmResponse\n    .replace(/```json\\n?/g, '')\n    .replace(/```\\n?/g, '')\n    .trim();\n  const match = cleaned.match(/\\[([\\s\\S]*?)\\]/);\n  if (match) {\n    productos = JSON.parse('[' + match[1] + ']');\n  } else {\n    productos = JSON.parse(cleaned);\n  }\n} catch (e) {\n  return [{\n    json: {\n      error: true,\n      reporte: 'La IA no pudo extraer productos de esta pagina. Posibles causas:\\n- La pagina bloquea el scraping\\n- No se encontraron productos para esa busqueda\\n- El HTML es demasiado grande\\n\\nIntenta con otro producto o URL.',\n      chatId: $('Parser de Comando').item.json.chatId,\n      guardar: false,\n      fecha: new Date().toISOString().split('T')[0]\n    }\n  }];\n}\n\nif (!Array.isArray(productos) || productos.length === 0) {\n  return [{\n    json: {\n      error: true,\n      reporte: 'No se encontraron productos para esta busqueda.',\n      chatId: $('Parser de Comando').item.json.chatId,\n      guardar: false,\n      fecha: new Date().toISOString().split('T')[0]\n    }\n  }];\n}\n\nconst precios = productos\n  .map(p => parseFloat(String(p.precio).replace(/[^\\d.]/g, '')))\n  .filter(p => !isNaN(p) && p > 0);\n\nconst precioPromedio = precios.length\n  ? Math.round(precios.reduce((a, b) => a + b, 0) / precios.length)\n  : 0;\nconst masBarato = precios.length ? Math.min(...precios) : 0;\nconst masCaro = precios.length ? Math.max(...precios) : 0;\n\nconst query = $('Parser de Comando').item.json.buscar;\nconst url = $('Parser de Comando').item.json.url;\nconst guardar = $('Parser de Comando').item.json.guardar;\nconst chatId = $('Parser de Comando').item.json.chatId;\nconst fecha = new Date().toISOString().split('T')[0];\n\nconst moneda = productos[0].moneda || 'COP';\nconst saveLabel = guardar ? '\\nGuardado en historico' : '\\nDatos NO guardados (agrega \"guardar\" al comando)';\n\nconst productoBarato = productos.find(p => parseFloat(String(p.precio).replace(/[^\\d.]/g, '')) === masBarato);\nconst productoCaro = productos.find(p => parseFloat(String(p.precio).replace(/[^\\d.]/g, '')) === masCaro);\n\nconst reporte = 'REPORTE DE PRODUCTOS\\n' + '='.repeat(30) + '\\n\\nBusqueda: ' + query + '\\nFuente: ' + url + '\\n\\nTotal productos encontrados: ' + productos.length + '\\n\\nPrecio Promedio: $' + precioPromedio.toLocaleString() + ' ' + moneda + '\\n\\nMas Barato: $' + masBarato.toLocaleString() + ' ' + moneda + '\\n  ' + (productoBarato ? productoBarato.titulo : '').substring(0, 60) + '\\n\\nMas Caro: $' + masCaro.toLocaleString() + ' ' + moneda + '\\n  ' + (productoCaro ? productoCaro.titulo : '').substring(0, 60) + '\\n\\nFecha: ' + fecha + saveLabel;\n\nreturn [{\n  json: {\n    tipo: 'dinamico', url, query, productos,\n    datosJson: JSON.stringify(productos),\n    precioPromedio, masBarato, masCaro,\n    totalItems: productos.length,\n    reporte, guardar, chatId, fecha, error: false\n  }\n}];",
+        "jsCode": "const input = $input.first().json;\nconst chatId = $('Verificar Scraping').item.json.chatId;\nconst query = $('Verificar Scraping').item.json.query;\nconst url = $('Verificar Scraping').item.json.url;\nconst guardar = $('Verificar Scraping').item.json.guardar;\n\n// Extraer respuesta del LLM\nlet llmResponse = '';\nif (input.choices && input.choices[0] && input.choices[0].message) {\n  llmResponse = input.choices[0].message.content || '';\n} else if (input.response) {\n  llmResponse = input.response;\n} else if (input.text) {\n  llmResponse = input.text;\n}\n\nlet productos = [];\ntry {\n  const cleaned = llmResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const match = cleaned.match(/\\[([\\s\\S]*?)\\]/);\n  if (match) {\n    productos = JSON.parse('[' + match[1] + ']');\n  } else {\n    productos = JSON.parse(cleaned);\n  }\n} catch (e) {\n  return [{\n    json: {\n      error: true,\n      reporte: 'La IA no pudo extraer productos.\\n\\nPosibles causas:\\n- El sitio bloquea scraping\\n- No hay productos para esa busqueda\\n- Formato HTML no reconocido\\n\\nIntenta con otro producto o URL.',\n      chatId, guardar: false, fecha: new Date().toISOString().split('T')[0]\n    }\n  }];\n}\n\nif (!Array.isArray(productos) || productos.length === 0) {\n  return [{\n    json: {\n      error: true,\n      reporte: 'No se encontraron productos para \"' + query + '\".\\nIntenta con otro termino de busqueda.',\n      chatId, guardar: false, fecha: new Date().toISOString().split('T')[0]\n    }\n  }];\n}\n\nconst precios = productos\n  .map(p => parseFloat(String(p.precio).replace(/[^\\d.]/g, '')))\n  .filter(p => !isNaN(p) && p > 0);\n\nconst precioPromedio = precios.length ? Math.round(precios.reduce((a, b) => a + b, 0) / precios.length) : 0;\nconst masBarato = precios.length ? Math.min(...precios) : 0;\nconst masCaro = precios.length ? Math.max(...precios) : 0;\n\nconst moneda = productos[0].moneda || 'COP';\nconst fecha = new Date().toISOString().split('T')[0];\n\nconst productoBarato = productos.find(p => parseFloat(String(p.precio).replace(/[^\\d.]/g, '')) === masBarato);\nconst productoCaro = productos.find(p => parseFloat(String(p.precio).replace(/[^\\d.]/g, '')) === masCaro);\n\nconst saveLabel = guardar ? '\\n\\nGuardado en historico' : '\\n\\nDatos efimeros (agrega \"guardar\" para persistir)';\n\nconst reporte = 'REPORTE DE PRODUCTOS\\n' + '='.repeat(30) + '\\n\\nBusqueda: ' + query + '\\nFuente: ' + url + '\\n\\nTotal productos: ' + productos.length + '\\n\\nPrecio Promedio: $' + precioPromedio.toLocaleString() + ' ' + moneda + '\\n\\nMas Barato: $' + masBarato.toLocaleString() + ' ' + moneda + '\\n  ' + (productoBarato ? productoBarato.titulo.substring(0, 50) : '') + '\\n\\nMas Caro: $' + masCaro.toLocaleString() + ' ' + moneda + '\\n  ' + (productoCaro ? productoCaro.titulo.substring(0, 50) : '') + '\\n\\nFecha: ' + fecha + saveLabel;\n\nreturn [{\n  json: {\n    tipo: 'dinamico', url, query, productos,\n    datosJson: JSON.stringify(productos),\n    precioPromedio, masBarato, masCaro,\n    totalItems: productos.length,\n    reporte, guardar, chatId, fecha, error: false\n  }\n}];",
         "mode": "runOnceForAllItems"
       },
       "typeVersion": 2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000025",
+      "id": "node-024",
       "name": "Guardar Dinamico?",
       "type": "n8n-nodes-base.if",
-      "position": [2120, 400],
+      "position": [1860, 400],
       "parameters": {
         "conditions": {
-          "options": {
-            "version": 2,
-            "leftValue": "",
-            "caseSensitive": true,
-            "typeValidation": "loose"
-          },
+          "options": { "version": 2, "leftValue": "", "caseSensitive": true, "typeValidation": "loose" },
           "combinator": "and",
-          "conditions": [
-            {
-              "id": "cond-0020",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              },
-              "leftValue": "={{ String($json.guardar) }}",
-              "rightValue": "true"
-            }
-          ]
+          "conditions": [{ "id": "c20", "operator": { "type": "string", "operation": "equals" }, "leftValue": "={{ String($json.guardar) }}", "rightValue": "true" }]
         }
       },
       "typeVersion": 2.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000026",
+      "id": "node-025",
       "name": "Sheets Guardar Dinamico",
       "type": "n8n-nodes-base.googleSheets",
-      "position": [2380, 320],
+      "position": [2120, 320],
       "parameters": {
         "operation": "append",
         "columns": {
@@ -443,239 +310,150 @@
           "convertFieldsToString": true
         },
         "options": {},
-        "sheetName": {
-          "__rl": true,
-          "mode": "byName",
-          "value": "Scraping_Dinamico"
-        },
-        "documentId": {
-          "__rl": true,
-          "mode": "byUrl",
-          "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit"
-        }
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Scraping_Dinamico" },
+        "documentId": { "__rl": true, "mode": "byUrl", "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit" }
       },
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "" } },
       "typeVersion": 4.5
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000027",
+      "id": "node-026",
       "name": "TG Reporte Dinamico",
+      "type": "n8n-nodes-base.telegram",
+      "position": [2380, 320],
+      "parameters": {
+        "chatId": "={{ $('Procesar Respuesta LLM').item.json.chatId }}",
+        "text": "={{ $('Procesar Respuesta LLM').item.json.reporte }}",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "node-027",
+      "name": "TG Link Dinamico",
       "type": "n8n-nodes-base.telegram",
       "position": [2640, 320],
       "parameters": {
         "chatId": "={{ $('Procesar Respuesta LLM').item.json.chatId }}",
-        "text": "={{ $('Procesar Respuesta LLM').item.json.reporte }}",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "text": "Dashboard: http://localhost:8501\nSelecciona 'Scraping Dinamico (E-commerce)' para graficos.",
+        "additionalFields": { "appendAttribution": false }
       },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
       "typeVersion": 1.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000028",
-      "name": "TG Link Dinamico",
+      "id": "node-028",
+      "name": "TG Reporte Dinamico NG",
       "type": "n8n-nodes-base.telegram",
-      "position": [2900, 320],
+      "position": [2120, 500],
       "parameters": {
         "chatId": "={{ $('Procesar Respuesta LLM').item.json.chatId }}",
-        "text": "Dashboard disponible en:\nhttp://localhost:8501\n\nSelecciona Scraping Dinamico (E-commerce) para ver graficos y comparativas.",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "text": "={{ $('Procesar Respuesta LLM').item.json.reporte }}",
+        "additionalFields": { "appendAttribution": false }
       },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
       "typeVersion": 1.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000029",
-      "name": "TG Reporte Dinamico NG",
+      "id": "node-029",
+      "name": "TG Link Dinamico NG",
       "type": "n8n-nodes-base.telegram",
       "position": [2380, 500],
       "parameters": {
         "chatId": "={{ $('Procesar Respuesta LLM').item.json.chatId }}",
-        "text": "={{ $('Procesar Respuesta LLM').item.json.reporte }}",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "text": "Dashboard: http://localhost:8501\n(Datos no guardados - agrega 'guardar' al comando)",
+        "additionalFields": { "appendAttribution": false }
       },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
       "typeVersion": 1.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000030",
-      "name": "TG Link Dinamico NG",
-      "type": "n8n-nodes-base.telegram",
-      "position": [2640, 500],
-      "parameters": {
-        "chatId": "={{ $('Procesar Respuesta LLM').item.json.chatId }}",
-        "text": "Dashboard disponible en:\nhttp://localhost:8501\n\nDatos NO guardados. Para guardar, agrega \"guardar\" al final del comando.",
-        "additionalFields": {
-          "appendAttribution": false
-        }
-      },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
-      "typeVersion": 1.2
-    },
-    {
-      "id": "a1b2c3d4-0001-4000-8000-000000000040",
+      "id": "node-040",
       "name": "Leer Estaticos",
       "type": "n8n-nodes-base.googleSheets",
       "position": [820, 700],
       "parameters": {
         "operation": "read",
-        "sheetName": {
-          "__rl": true,
-          "mode": "byName",
-          "value": "Scraping_Estatico"
-        },
-        "documentId": {
-          "__rl": true,
-          "mode": "byUrl",
-          "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit"
-        },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Scraping_Estatico" },
+        "documentId": { "__rl": true, "mode": "byUrl", "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit" },
         "options": {}
       },
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "" } },
       "typeVersion": 4.5
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000041",
+      "id": "node-041",
       "name": "Leer Dinamicos",
       "type": "n8n-nodes-base.googleSheets",
       "position": [820, 840],
       "parameters": {
         "operation": "read",
-        "sheetName": {
-          "__rl": true,
-          "mode": "byName",
-          "value": "Scraping_Dinamico"
-        },
-        "documentId": {
-          "__rl": true,
-          "mode": "byUrl",
-          "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit"
-        },
+        "sheetName": { "__rl": true, "mode": "byName", "value": "Scraping_Dinamico" },
+        "documentId": { "__rl": true, "mode": "byUrl", "value": "https://docs.google.com/spreadsheets/d/1Dy94Jqe02BtPpiJLqDllwgJauohzGHCNbWJYir9QBXI/edit" },
         "options": {}
       },
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "googleSheetsOAuth2Api": { "id": "", "name": "" } },
       "typeVersion": 4.5
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000042",
+      "id": "node-042",
       "name": "Generar Reporte",
       "type": "n8n-nodes-base.code",
       "position": [1080, 770],
       "parameters": {
-        "jsCode": "const chatId = $('Parser de Comando').item.json.chatId;\nconst userName = $('Parser de Comando').item.json.userName;\n\n// Contar registros de ambas hojas\nlet totalEstaticos = 0;\nlet totalDinamicos = 0;\nlet ultimosEstaticos = [];\nlet ultimosDinamicos = [];\n\ntry {\n  const estaticos = $('Leer Estaticos').all();\n  totalEstaticos = estaticos.length;\n  ultimosEstaticos = estaticos.slice(-3).map(item => {\n    const j = item.json;\n    return (j.Fecha || 'N/A') + ' | ' + (j.URL || 'N/A').substring(0, 40) + ' | ' + (j.Titulo || 'N/A').substring(0, 30);\n  });\n} catch(e) {}\n\ntry {\n  const dinamicos = $('Leer Dinamicos').all();\n  totalDinamicos = dinamicos.length;\n  ultimosDinamicos = dinamicos.slice(-3).map(item => {\n    const j = item.json;\n    return (j.Fecha || j['Fecha '] || 'N/A') + ' | ' + (j.Query_buscado || j.Query_Buscado || 'N/A') + ' en ' + (j.URL_Origen || 'N/A').substring(0, 30);\n  });\n} catch(e) {}\n\nconst total = totalEstaticos + totalDinamicos;\nconst fecha = new Date().toISOString().split('T')[0];\n\nlet reporte = 'REPORTE DE HISTORICO\\n' + '='.repeat(30) + '\\n\\nHola ' + userName + '!\\n\\nTotal registros guardados: ' + total + '\\n  Auditorias Web (Estatico): ' + totalEstaticos + '\\n  Busquedas E-commerce (Dinamico): ' + totalDinamicos + '\\n';\n\nif (ultimosEstaticos.length > 0) {\n  reporte += '\\nUltimas auditorias:\\n  ' + ultimosEstaticos.join('\\n  ') + '\\n';\n}\n\nif (ultimosDinamicos.length > 0) {\n  reporte += '\\nUltimas busquedas:\\n  ' + ultimosDinamicos.join('\\n  ') + '\\n';\n}\n\nreporte += '\\nFecha del reporte: ' + fecha;\nreporte += '\\n\\nVer graficos completos en:\\nhttp://localhost:8501';\n\nreturn [{ json: { reporte, chatId } }];",
+        "jsCode": "const chatId = $('Parser de Comando').item.json.chatId;\nconst userName = $('Parser de Comando').item.json.userName;\n\nlet totalEstaticos = 0;\nlet totalDinamicos = 0;\nlet ultimosEstaticos = [];\nlet ultimosDinamicos = [];\n\ntry {\n  const estaticos = $('Leer Estaticos').all();\n  totalEstaticos = estaticos.length;\n  ultimosEstaticos = estaticos.slice(-3).map(item => {\n    const j = item.json;\n    return '  ' + (j.Fecha || 'N/A') + ' | ' + (j.URL || 'N/A').substring(0, 35) + ' | ' + (j.Titulo || 'N/A').substring(0, 25);\n  });\n} catch(e) {}\n\ntry {\n  const dinamicos = $('Leer Dinamicos').all();\n  totalDinamicos = dinamicos.length;\n  ultimosDinamicos = dinamicos.slice(-3).map(item => {\n    const j = item.json;\n    return '  ' + (j.Fecha || j['Fecha '] || 'N/A') + ' | ' + (j.Query_buscado || j.Query_Buscado || 'N/A') + ' en ' + (j.URL_Origen || 'N/A').substring(0, 25);\n  });\n} catch(e) {}\n\nconst total = totalEstaticos + totalDinamicos;\nconst fecha = new Date().toISOString().split('T')[0];\n\nlet reporte = 'REPORTE DE HISTORICO\\n' + '='.repeat(30) + '\\n\\nHola ' + userName + '!\\n\\nTotal registros: ' + total + '\\n  Auditorias SEO: ' + totalEstaticos + '\\n  Busquedas E-commerce: ' + totalDinamicos + '\\n';\n\nif (ultimosEstaticos.length > 0) {\n  reporte += '\\nUltimas auditorias:\\n' + ultimosEstaticos.join('\\n') + '\\n';\n}\nif (ultimosDinamicos.length > 0) {\n  reporte += '\\nUltimas busquedas:\\n' + ultimosDinamicos.join('\\n') + '\\n';\n}\n\nreporte += '\\nFecha: ' + fecha + '\\n\\nDashboard: http://localhost:8501';\n\nreturn [{ json: { reporte, chatId } }];",
         "mode": "runOnceForAllItems"
       },
       "typeVersion": 2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000043",
+      "id": "node-043",
       "name": "TG Reporte General",
       "type": "n8n-nodes-base.telegram",
       "position": [1340, 770],
       "parameters": {
         "chatId": "={{ $json.chatId }}",
         "text": "={{ $json.reporte }}",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "additionalFields": { "appendAttribution": false }
       },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
       "typeVersion": 1.2
     },
     {
-      "id": "a1b2c3d4-0001-4000-8000-000000000050",
+      "id": "node-050",
       "name": "TG Respuesta Simple",
       "type": "n8n-nodes-base.telegram",
       "position": [820, 1000],
       "parameters": {
         "chatId": "={{ $json.chatId }}",
         "text": "={{ $json.mensaje }}",
-        "additionalFields": {
-          "appendAttribution": false
-        }
+        "additionalFields": { "appendAttribution": false }
       },
-      "credentials": {
-        "telegramApi": {
-          "id": "",
-          "name": ""
-        }
-      },
+      "credentials": { "telegramApi": { "id": "", "name": "" } },
       "typeVersion": 1.2
     }
   ],
   "connections": {
     "Telegram Trigger": {
-      "main": [
-        [{"node": "Parser de Comando", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "Parser de Comando", "type": "main", "index": 0}]]
     },
     "Parser de Comando": {
-      "main": [
-        [{"node": "Switch Tipo", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "Switch Tipo", "type": "main", "index": 0}]]
     },
     "Switch Tipo": {
       "main": [
         [{"node": "HTTP GET Estatico", "type": "main", "index": 0}],
-        [{"node": "Construir URL Busqueda", "type": "main", "index": 0}],
+        [{"node": "Playwright Scraper", "type": "main", "index": 0}],
         [{"node": "Leer Estaticos", "type": "main", "index": 0}, {"node": "Leer Dinamicos", "type": "main", "index": 0}],
         [{"node": "TG Respuesta Simple", "type": "main", "index": 0}]
       ]
     },
     "HTTP GET Estatico": {
-      "main": [
-        [{"node": "Analisis HTML", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "Analisis HTML", "type": "main", "index": 0}]]
     },
     "Analisis HTML": {
-      "main": [
-        [{"node": "Guardar Estatico?", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "Guardar Estatico?", "type": "main", "index": 0}]]
     },
     "Guardar Estatico?": {
       "main": [
@@ -684,44 +462,25 @@
       ]
     },
     "Sheets Guardar Estatico": {
-      "main": [
-        [{"node": "TG Reporte Estatico", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "TG Reporte Estatico", "type": "main", "index": 0}]]
     },
     "TG Reporte Estatico": {
-      "main": [
-        [{"node": "TG Link Estatico", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "TG Link Estatico", "type": "main", "index": 0}]]
     },
     "TG Reporte Estatico NG": {
-      "main": [
-        [{"node": "TG Link Estatico NG", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "TG Link Estatico NG", "type": "main", "index": 0}]]
     },
-    "Construir URL Busqueda": {
-      "main": [
-        [{"node": "HTTP GET Dinamico", "type": "main", "index": 0}]
-      ]
+    "Playwright Scraper": {
+      "main": [[{"node": "Verificar Scraping", "type": "main", "index": 0}]]
     },
-    "HTTP GET Dinamico": {
-      "main": [
-        [{"node": "Preparar Prompt IA", "type": "main", "index": 0}]
-      ]
-    },
-    "Preparar Prompt IA": {
-      "main": [
-        [{"node": "AI Scraper Groq", "type": "main", "index": 0}]
-      ]
+    "Verificar Scraping": {
+      "main": [[{"node": "AI Scraper Groq", "type": "main", "index": 0}]]
     },
     "AI Scraper Groq": {
-      "main": [
-        [{"node": "Procesar Respuesta LLM", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "Procesar Respuesta LLM", "type": "main", "index": 0}]]
     },
     "Procesar Respuesta LLM": {
-      "main": [
-        [{"node": "Guardar Dinamico?", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "Guardar Dinamico?", "type": "main", "index": 0}]]
     },
     "Guardar Dinamico?": {
       "main": [
@@ -730,39 +489,25 @@
       ]
     },
     "Sheets Guardar Dinamico": {
-      "main": [
-        [{"node": "TG Reporte Dinamico", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "TG Reporte Dinamico", "type": "main", "index": 0}]]
     },
     "TG Reporte Dinamico": {
-      "main": [
-        [{"node": "TG Link Dinamico", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "TG Link Dinamico", "type": "main", "index": 0}]]
     },
     "TG Reporte Dinamico NG": {
-      "main": [
-        [{"node": "TG Link Dinamico NG", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "TG Link Dinamico NG", "type": "main", "index": 0}]]
     },
     "Leer Estaticos": {
-      "main": [
-        [{"node": "Generar Reporte", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "Generar Reporte", "type": "main", "index": 0}]]
     },
     "Leer Dinamicos": {
-      "main": [
-        [{"node": "Generar Reporte", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "Generar Reporte", "type": "main", "index": 0}]]
     },
     "Generar Reporte": {
-      "main": [
-        [{"node": "TG Reporte General", "type": "main", "index": 0}]
-      ]
+      "main": [[{"node": "TG Reporte General", "type": "main", "index": 0}]]
     }
   },
   "active": false,
-  "settings": {
-    "executionOrder": "v1"
-  },
+  "settings": { "executionOrder": "v1" },
   "pinData": {}
 }
