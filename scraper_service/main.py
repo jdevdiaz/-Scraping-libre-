@@ -1,22 +1,26 @@
 """
 Microservicio de Scraping con Playwright
 =========================================
-FastAPI server que recibe URLs y devuelve HTML renderizado
+FastAPI server que recibe URLs y devuelve HTML limpio + productos extraídos
 usando un navegador real con técnicas anti-detección.
 
 Uso:
     uvicorn main:app --host 0.0.0.0 --port 8000
 
 Endpoints:
-    POST /scrape  — Scraping general (navega a URL, scroll, devuelve HTML)
-    POST /search  — Busca un producto en e-commerce (navega, busca, scroll, devuelve HTML)
+    POST /scrape  — Scraping general (navega a URL, scroll, devuelve HTML limpio)
+    POST /search  — Busca productos en e-commerce (extrae productos directamente)
     GET  /health  — Health check
 """
 
 import asyncio
+import json
 import os
+import re
 import random
 from contextlib import asynccontextmanager
+from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -57,7 +61,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Playwright Scraper Service",
     description="Microservicio de scraping con navegador real",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -73,24 +77,23 @@ class ScrapeRequest(BaseModel):
 
 class ScrapeResponse(BaseModel):
     html: str
+    productos: list[dict[str, Any]] = []
     url_final: str
     longitud: int
     titulo: str
+    total_productos: int = 0
     success: bool
     error: str = ""
-    productos: list = []
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async def create_stealth_context() -> BrowserContext:
     """Crea un contexto de navegador con configuración anti-detección."""
-    # Obtenemos el UA real del navegador
     temp_page = await browser_instance.new_page()
     real_ua = await temp_page.evaluate("navigator.userAgent")
     await temp_page.close()
-    
-    # Limpiamos la palabra "HeadlessChrome" por "Chrome" para no levantar sospechas
+
     stealth_ua = real_ua.replace("HeadlessChrome", "Chrome")
 
     context = await browser_instance.new_context(
@@ -114,19 +117,24 @@ async def auto_scroll(page, max_attempts: int = 8) -> None:
         prev_height = current_height
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         await asyncio.sleep(random.uniform(1.0, 2.5))
-    # Scroll back to top
     await page.evaluate("window.scrollTo(0, 0)")
     await asyncio.sleep(0.5)
 
 
-def clean_html(html: str) -> str:
-    """Elimina etiquetas pesadas e inútiles para la IA reduciendo el tamaño drásticamente."""
-    import re
-    # Eliminar scripts, styles, svgs, noscripts, iframes
-    cleaned = re.sub(r'<(script|style|svg|noscript|iframe|path)[^>]*>.*?</\1>', '', html, flags=re.IGNORECASE | re.DOTALL)
-    # Eliminar comentarios HTML
-    cleaned = re.sub(r'<!--.*?-->', '', cleaned, flags=re.DOTALL)
-    return cleaned
+def is_blocked(html: str) -> bool:
+    """Detecta si el sitio mostró una página de bloqueo/CAPTCHA."""
+    block_indicators = [
+        "account-verification",
+        "suspicious-traffic",
+        "captcha",
+        "robot",
+        "blocked",
+        "access denied",
+        "cf-challenge",
+        "challenge-platform",
+    ]
+    html_lower = html.lower()
+    return any(indicator in html_lower for indicator in block_indicators)
 
 
 def build_search_url(base_url: str, query: str) -> str:
@@ -135,7 +143,6 @@ def build_search_url(base_url: str, query: str) -> str:
     q_encoded = query.strip().replace(" ", "+")
 
     if "mercadolibre" in base_url:
-        import re
         domain_match = re.match(r"https?://(?:www\.)?([^/]+)", base_url)
         if domain_match:
             domain = domain_match.group(1)
@@ -143,18 +150,156 @@ def build_search_url(base_url: str, query: str) -> str:
                 return f"https://{domain}/{q}"
             return f"https://listado.{domain}/{q}"
         return f"{base_url}/{q}"
-
     elif "amazon" in base_url:
         return f"{base_url}/s?k={q_encoded}"
-
     elif "ebay" in base_url:
         return f"{base_url}/sch/i.html?_nkw={q_encoded}"
-
     elif "aliexpress" in base_url:
         return f"https://www.aliexpress.com/wholesale?SearchText={q_encoded}"
-
     else:
         return f"{base_url}/search?q={q_encoded}"
+
+
+def clean_html(raw_html: str) -> str:
+    """Limpia HTML eliminando scripts, styles y contenido no relevante."""
+    cleaned = re.sub(r'<script[^>]*>[\s\S]*?</script>', '', raw_html, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<style[^>]*>[\s\S]*?</style>', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<svg[^>]*>[\s\S]*?</svg>', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<!--[\s\S]*?-->', '', cleaned)
+    cleaned = re.sub(r'\s+data-[a-z-]+="[^"]*"', '', cleaned)
+    cleaned = re.sub(r'\s+style="[^"]*"', '', cleaned)
+    cleaned = re.sub(r'\s+class="[^"]{100,}"', '', cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    cleaned = re.sub(r'>\s+<', '><', cleaned)
+    return cleaned.strip()
+
+
+async def extract_products_mercadolibre(page) -> list[dict]:
+    """Extrae productos de MercadoLibre ejecutando JavaScript directamente en el navegador."""
+    try:
+        products = await page.evaluate("""
+        () => {
+            const results = [];
+
+            // Estrategia 1: Buscar items de búsqueda (estructura clásica y nueva)
+            const itemSelectors = [
+                'li.ui-search-layout__item',
+                'div[class*="poly-card"]',
+                'section[class*="poly-card"]',
+                'li[class*="search-layout__item"]',
+                'div.ui-search-result__wrapper',
+            ];
+
+            let items = [];
+            for (const sel of itemSelectors) {
+                items = document.querySelectorAll(sel);
+                if (items.length >= 3) break;
+            }
+
+            // Fallback: buscar contenedores con precio visible
+            if (items.length < 3) {
+                items = document.querySelectorAll('ol.ui-search-layout li, div[class*="search-result"]');
+            }
+
+            for (const item of items) {
+                try {
+                    // TITULO: buscar en h2, h3, o enlaces con texto
+                    let titulo = '';
+                    let enlace = '';
+
+                    const titleEl = item.querySelector('h2 a') ||
+                                   item.querySelector('a h2') ||
+                                   item.querySelector('h2[class*="title"]') ||
+                                   item.querySelector('a[class*="title"]') ||
+                                   item.querySelector('h2') ||
+                                   item.querySelector('h3 a');
+
+                    if (titleEl) {
+                        titulo = titleEl.innerText.trim();
+                        if (titleEl.tagName === 'A') {
+                            enlace = titleEl.href || '';
+                        } else {
+                            const parentA = titleEl.closest('a') || titleEl.querySelector('a');
+                            if (parentA) enlace = parentA.href || '';
+                        }
+                    }
+
+                    if (!titulo) continue;
+
+                    // PRECIO: buscar fracciones de precio
+                    let precio = 0;
+                    let moneda = 'COP';
+
+                    // Buscar el contenedor de precio actual (no tachado/anterior)
+                    const priceContainer = item.querySelector('[class*="poly-price__current"]') ||
+                                          item.querySelector('[class*="price__second-line"]') ||
+                                          item;
+
+                    const fractionEl = priceContainer.querySelector('span[class*="fraction"]') ||
+                                      item.querySelector('span.andes-money-amount__fraction') ||
+                                      item.querySelector('span[class*="price-tag-fraction"]');
+
+                    if (fractionEl) {
+                        const priceText = fractionEl.innerText.replace(/[^\\d]/g, '');
+                        precio = parseInt(priceText) || 0;
+                    }
+
+                    // Si no encontró con selectores, buscar patrón $ en texto
+                    if (precio === 0) {
+                        const allText = item.innerText || '';
+                        const priceMatch = allText.match(/\\$\\s*([\\d.,]+)/);
+                        if (priceMatch) {
+                            const cleaned = priceMatch[1].replace(/[^\\d]/g, '');
+                            precio = parseInt(cleaned) || 0;
+                        }
+                    }
+
+                    // MONEDA
+                    const currencyEl = item.querySelector('span[class*="currency-symbol"]');
+                    if (currencyEl) {
+                        const symbol = currencyEl.innerText.trim();
+                        if (symbol.includes('US')) moneda = 'USD';
+                    }
+
+                    // ENLACE (fallback si no se obtuvo del título)
+                    if (!enlace) {
+                        const linkEl = item.querySelector('a[href*="mercadolibre"]') ||
+                                      item.querySelector('a[href*="meli"]') ||
+                                      item.querySelector('a[href]');
+                        if (linkEl) enlace = linkEl.href || '';
+                    }
+
+                    // VENDEDOR
+                    let vendedor = 'N/A';
+                    const sellerEl = item.querySelector('[class*="seller"]') ||
+                                    item.querySelector('[class*="official-store"]') ||
+                                    item.querySelector('span[class*="poly-component__seller"]');
+                    if (sellerEl) vendedor = sellerEl.innerText.trim();
+
+                    results.push({ titulo, precio, moneda, enlace, vendedor });
+
+                } catch (e) {
+                    continue;
+                }
+            }
+
+            return results;
+        }
+        """)
+
+        print(f"[EXTRACT] JS extraction found {len(products)} products")
+        return products if products else []
+
+    except Exception as e:
+        print(f"[EXTRACT] JS extraction error: {e}")
+        return []
+
+
+async def extract_products_generic(page, base_url: str) -> list[dict]:
+    """Extrae productos de sitios genéricos usando heurísticas."""
+    if "mercadolibre" in base_url:
+        return await extract_products_mercadolibre(page)
+    return []
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -166,20 +311,18 @@ async def health():
 
 @app.post("/scrape", response_model=ScrapeResponse)
 async def scrape_page(req: ScrapeRequest):
-    """Scraping general: navega a la URL, scroll, devuelve HTML."""
+    """Scraping general: navega a la URL, scroll, devuelve HTML limpio."""
     context = None
     try:
         context = await create_stealth_context()
         page = await context.new_page()
-        
-        # Aplicar el modo stealth
+
         await Stealth().apply_stealth_async(page)
 
         # Warmup de cookies: visitar el dominio raíz primero
         try:
-            from urllib.parse import urlparse
             parsed_uri = urlparse(req.url)
-            base_domain = '{uri.scheme}://{uri.netloc}'.format(uri=parsed_uri)
+            base_domain = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
             await page.goto(base_domain, wait_until="commit", timeout=10000)
             await asyncio.sleep(random.uniform(0.5, 1.5))
         except Exception:
@@ -191,11 +334,10 @@ async def scrape_page(req: ScrapeRequest):
         if req.scroll:
             await auto_scroll(page, req.max_scroll)
 
-        html = await page.content()
+        raw_html = await page.content()
+        html = clean_html(raw_html)
         title = await page.title()
         final_url = page.url
-
-        html = clean_html(html)
 
         return ScrapeResponse(
             html=html,
@@ -222,107 +364,126 @@ async def scrape_page(req: ScrapeRequest):
 @app.post("/search", response_model=ScrapeResponse)
 async def search_products(req: ScrapeRequest):
     """
-    Búsqueda de productos: construye URL de búsqueda según el sitio,
-    navega con navegador real, scroll para cargar productos, devuelve HTML.
+    Búsqueda de productos: navega con navegador real, extrae productos
+    directamente del DOM y también devuelve HTML limpio como fallback.
+    Incluye detección de bloqueos y reintento automático.
     """
     if not req.buscar:
         raise HTTPException(status_code=400, detail="Campo 'buscar' es requerido")
 
-    context = None
-    try:
-        search_url = build_search_url(req.url, req.buscar)
-        context = await create_stealth_context()
-        page = await context.new_page()
-        
-        # Aplicar el modo stealth
-        await Stealth().apply_stealth_async(page)
+    max_retries = 2
+    last_error = ""
 
-        # Warmup de cookies: visitar el dominio raíz primero
+    for attempt in range(max_retries):
+        context = None
         try:
-            from urllib.parse import urlparse
-            parsed_uri = urlparse(req.url)
-            base_domain = '{uri.scheme}://{uri.netloc}'.format(uri=parsed_uri)
-            await page.goto(base_domain, wait_until="commit", timeout=10000)
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-        except Exception:
-            pass
+            search_url = build_search_url(req.url, req.buscar)
+            context = await create_stealth_context()
+            page = await context.new_page()
 
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
-        await asyncio.sleep(random.uniform(2.0, 4.0))
+            await Stealth().apply_stealth_async(page)
 
-        # Cerrar popups/banners si existen
-        for selector in [
-            "button[data-testid='action:close']",
-            ".cookie-consent-banner button",
-            "[aria-label='Cerrar']",
-            ".modal-close",
-        ]:
+            # Warmup de cookies en primer intento
+            if attempt == 0:
+                try:
+                    parsed_uri = urlparse(req.url)
+                    base_domain = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
+                    await page.goto(base_domain, wait_until="commit", timeout=10000)
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
+                except Exception:
+                    pass
+
+            # Espera aleatoria antes de navegar (simula comportamiento humano)
+            if attempt > 0:
+                await asyncio.sleep(random.uniform(3.0, 6.0))
+
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+
+            # Verificar si estamos bloqueados
+            raw_html = await page.content()
+            if is_blocked(raw_html):
+                last_error = f"El sitio mostro una pagina de verificacion/CAPTCHA (intento {attempt + 1})"
+                print(f"[BLOCKED] Attempt {attempt + 1}: {search_url}")
+                await context.close()
+                context = None
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(random.uniform(5.0, 10.0))
+                    continue
+                else:
+                    return ScrapeResponse(
+                        html="",
+                        url_final=search_url,
+                        longitud=0,
+                        titulo="",
+                        success=False,
+                        error=last_error + ". El sitio esta bloqueando peticiones desde este servidor. Intenta de nuevo en unos minutos.",
+                    )
+
+            # Cerrar popups/banners si existen
+            for selector in [
+                "button[data-testid='action:close']",
+                ".cookie-consent-banner button",
+                "[aria-label='Cerrar']",
+                ".modal-close",
+                "button.cookie-consent-banner-opt-out__action--key-accept",
+            ]:
+                try:
+                    btn = page.locator(selector).first
+                    if await btn.is_visible(timeout=2000):
+                        await btn.click()
+                        await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+
+            # Esperar a que carguen los productos
             try:
-                btn = page.locator(selector).first
-                if await btn.is_visible(timeout=2000):
-                    await btn.click()
-                    await asyncio.sleep(0.5)
+                await page.wait_for_selector(
+                    "li.ui-search-layout__item, div.poly-card, section.poly-card, ol.ui-search-layout",
+                    timeout=10000,
+                )
             except Exception:
                 pass
 
-        if req.scroll:
-            await auto_scroll(page, req.max_scroll)
+            if req.scroll:
+                await auto_scroll(page, req.max_scroll)
 
-        html = await page.content()
-        title = await page.title()
-        final_url = page.url
+            # Extraer productos directamente del DOM
+            productos = await extract_products_generic(page, req.url)
 
-        # Detección básica de bloqueos por CAPTCHA o Cloudflare
-        title_lower = title.lower()
-        if "captcha" in title_lower or "just a moment" in title_lower or "robot" in title_lower or "security" in title_lower:
-            raise Exception(f"Bloqueo detectado (CAPTCHA/Cloudflare). Título de la página: {title}")
+            # Obtener HTML limpio como fallback para Groq
+            raw_html = await page.content()
+            html = clean_html(raw_html)
+            html = html[:60000]
 
-        # Extracción local inteligente para evitar gastar tokens de IA
-        productos_extraidos = []
-        if "mercadolibre" in req.url.lower() or "mercadolibre" in final_url.lower():
-            items = await page.query_selector_all(".ui-search-layout__item, .ui-search-result__wrapper")
-            for item in items[:50]:
-                title_el = await item.query_selector("h2, .poly-component__title, .ui-search-item__title")
-                price_el = await item.query_selector(".andes-money-amount__fraction")
-                link_el = await item.query_selector("a")
-                
-                if title_el and price_el and link_el:
-                    try:
-                        p_title = await title_el.inner_text()
-                        p_price_text = await price_el.inner_text()
-                        p_price = int(p_price_text.replace(".", "").replace(",", ""))
-                        p_link = await link_el.get_attribute("href")
-                        productos_extraidos.append({
-                            "titulo": p_title.strip(),
-                            "precio": p_price,
-                            "link": p_link
-                        })
-                    except Exception:
-                        pass
+            title = await page.title()
+            final_url = page.url
 
-        html = clean_html(html)
+            return ScrapeResponse(
+                html=html,
+                productos=productos,
+                url_final=final_url,
+                longitud=len(html),
+                titulo=title,
+                total_productos=len(productos),
+                success=True,
+            )
 
-        return ScrapeResponse(
-            html=html,
-            url_final=final_url,
-            longitud=len(html),
-            titulo=title,
-            success=True,
-            productos=productos_extraidos,
-        )
-
-    except Exception as e:
-        return ScrapeResponse(
-            html="",
-            url_final=req.url,
-            longitud=0,
-            titulo="",
-            success=False,
-            error=str(e),
-        )
-    finally:
-        if context:
-            await context.close()
+        except Exception as e:
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                continue
+            return ScrapeResponse(
+                html="",
+                url_final=req.url,
+                longitud=0,
+                titulo="",
+                success=False,
+                error=last_error,
+            )
+        finally:
+            if context:
+                await context.close()
 
 
 if __name__ == "__main__":
