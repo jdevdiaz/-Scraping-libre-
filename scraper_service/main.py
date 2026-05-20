@@ -20,10 +20,12 @@ import re
 import random
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from playwright.async_api import async_playwright, Browser, BrowserContext
+from playwright_stealth import Stealth
 
 # ─── Configuración ───────────────────────────────────────────────────────────
 
@@ -88,29 +90,20 @@ class ScrapeResponse(BaseModel):
 
 async def create_stealth_context() -> BrowserContext:
     """Crea un contexto de navegador con configuración anti-detección."""
+    temp_page = await browser_instance.new_page()
+    real_ua = await temp_page.evaluate("navigator.userAgent")
+    await temp_page.close()
+
+    stealth_ua = real_ua.replace("HeadlessChrome", "Chrome")
+
     context = await browser_instance.new_context(
         viewport={"width": 1366, "height": 768},
-        user_agent=(
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-        ),
+        user_agent=stealth_ua,
         locale="es-CO",
         timezone_id="America/Bogota",
         geolocation={"latitude": 4.711, "longitude": -74.0721},
         permissions=["geolocation"],
     )
-
-    await context.add_init_script("""
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        Object.defineProperty(navigator, 'languages', { get: () => ['es-CO', 'es', 'en'] });
-        window.chrome = { runtime: {} };
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters) =>
-            parameters.name === 'notifications'
-                ? Promise.resolve({ state: Notification.permission })
-                : originalQuery(parameters);
-    """)
     return context
 
 
@@ -137,7 +130,7 @@ def is_blocked(html: str) -> bool:
         "robot",
         "blocked",
         "access denied",
-        "cf-challenge",  # Cloudflare
+        "cf-challenge",
         "challenge-platform",
     ]
     html_lower = html.lower()
@@ -153,6 +146,8 @@ def build_search_url(base_url: str, query: str) -> str:
         domain_match = re.match(r"https?://(?:www\.)?([^/]+)", base_url)
         if domain_match:
             domain = domain_match.group(1)
+            if domain.startswith("listado."):
+                return f"https://{domain}/{q}"
             return f"https://listado.{domain}/{q}"
         return f"{base_url}/{q}"
     elif "amazon" in base_url:
@@ -167,20 +162,13 @@ def build_search_url(base_url: str, query: str) -> str:
 
 def clean_html(raw_html: str) -> str:
     """Limpia HTML eliminando scripts, styles y contenido no relevante."""
-    # Eliminar scripts
     cleaned = re.sub(r'<script[^>]*>[\s\S]*?</script>', '', raw_html, flags=re.IGNORECASE)
-    # Eliminar styles
     cleaned = re.sub(r'<style[^>]*>[\s\S]*?</style>', '', cleaned, flags=re.IGNORECASE)
-    # Eliminar SVGs
     cleaned = re.sub(r'<svg[^>]*>[\s\S]*?</svg>', '', cleaned, flags=re.IGNORECASE)
-    # Eliminar comentarios HTML
     cleaned = re.sub(r'<!--[\s\S]*?-->', '', cleaned)
-    # Eliminar atributos data-* y style inline para reducir tamaño
     cleaned = re.sub(r'\s+data-[a-z-]+="[^"]*"', '', cleaned)
     cleaned = re.sub(r'\s+style="[^"]*"', '', cleaned)
-    # Eliminar clases CSS muy largas (más de 100 chars)
     cleaned = re.sub(r'\s+class="[^"]{100,}"', '', cleaned)
-    # Colapsar whitespace
     cleaned = re.sub(r'\s+', ' ', cleaned)
     cleaned = re.sub(r'>\s+<', '><', cleaned)
     return cleaned.strip()
@@ -311,8 +299,6 @@ async def extract_products_generic(page, base_url: str) -> list[dict]:
     """Extrae productos de sitios genéricos usando heurísticas."""
     if "mercadolibre" in base_url:
         return await extract_products_mercadolibre(page)
-
-    # Para otros sitios, devolver lista vacía (Groq analizará el HTML)
     return []
 
 
@@ -330,6 +316,17 @@ async def scrape_page(req: ScrapeRequest):
     try:
         context = await create_stealth_context()
         page = await context.new_page()
+
+        await Stealth().apply_stealth_async(page)
+
+        # Warmup de cookies: visitar el dominio raíz primero
+        try:
+            parsed_uri = urlparse(req.url)
+            base_domain = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
+            await page.goto(base_domain, wait_until="commit", timeout=10000)
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+        except Exception:
+            pass
 
         await page.goto(req.url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
         await asyncio.sleep(random.uniform(1.0, 2.0))
@@ -384,6 +381,18 @@ async def search_products(req: ScrapeRequest):
             context = await create_stealth_context()
             page = await context.new_page()
 
+            await Stealth().apply_stealth_async(page)
+
+            # Warmup de cookies en primer intento
+            if attempt == 0:
+                try:
+                    parsed_uri = urlparse(req.url)
+                    base_domain = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
+                    await page.goto(base_domain, wait_until="commit", timeout=10000)
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
+                except Exception:
+                    pass
+
             # Espera aleatoria antes de navegar (simula comportamiento humano)
             if attempt > 0:
                 await asyncio.sleep(random.uniform(3.0, 6.0))
@@ -434,7 +443,7 @@ async def search_products(req: ScrapeRequest):
                     timeout=10000,
                 )
             except Exception:
-                pass  # Continuar aunque no encuentre el selector exacto
+                pass
 
             if req.scroll:
                 await auto_scroll(page, req.max_scroll)
