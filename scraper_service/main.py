@@ -187,146 +187,124 @@ def clean_html(raw_html: str) -> str:
 
 
 async def extract_products_mercadolibre(page) -> list[dict]:
-    """Extrae productos de MercadoLibre usando selectores del DOM."""
-    products = []
+    """Extrae productos de MercadoLibre ejecutando JavaScript directamente en el navegador."""
     try:
-        # Selectores de MercadoLibre (múltiples variantes para resiliencia)
-        selectors = [
-            "li.ui-search-layout__item",
-            "div.ui-search-result",
-            "li[class*='search-layout__item']",
-            "div[class*='poly-card']",
-            "section.poly-card",
-            "ol.ui-search-layout li",
-            "div.ui-search-layout__item",
-        ]
+        products = await page.evaluate("""
+        () => {
+            const results = [];
 
-        items = []
-        for selector in selectors:
-            items = await page.query_selector_all(selector)
-            if len(items) >= 3:
-                break
+            // Estrategia 1: Buscar items de búsqueda (estructura clásica y nueva)
+            const itemSelectors = [
+                'li.ui-search-layout__item',
+                'div[class*="poly-card"]',
+                'section[class*="poly-card"]',
+                'li[class*="search-layout__item"]',
+                'div.ui-search-result__wrapper',
+            ];
 
-        if not items:
-            # Fallback: buscar cualquier contenedor con enlaces a productos
-            items = await page.query_selector_all("[class*='poly-card'], [class*='search-result']")
+            let items = [];
+            for (const sel of itemSelectors) {
+                items = document.querySelectorAll(sel);
+                if (items.length >= 3) break;
+            }
 
-        print(f"[EXTRACT] Found {len(items)} potential product items")
+            // Fallback: buscar contenedores con precio visible
+            if (items.length < 3) {
+                items = document.querySelectorAll('ol.ui-search-layout li, div[class*="search-result"]');
+            }
 
-        for item in items[:50]:  # Max 50 productos
-            product = {}
-            try:
-                # Título — múltiples estrategias
-                title_el = None
-                title_selectors = [
-                    "h2 a",
-                    "a h2",
-                    "h2.poly-component__title a",
-                    "a.poly-component__title",
-                    "h2.ui-search-item__title",
-                    "a.ui-search-link__title-card",
-                    "h2 a[class*='title']",
-                    "a[class*='title']",
-                    "h2",
-                    "h3 a",
-                    "a[title]",
-                ]
-                for ts in title_selectors:
-                    title_el = await item.query_selector(ts)
-                    if title_el:
-                        break
+            for (const item of items) {
+                try {
+                    // TITULO: buscar en h2, h3, o enlaces con texto
+                    let titulo = '';
+                    let enlace = '';
 
-                if title_el:
-                    product["titulo"] = (await title_el.inner_text()).strip()
-                    href = await title_el.get_attribute("href")
-                    if href:
-                        product["enlace"] = href
-                else:
-                    continue  # Sin título no sirve
+                    const titleEl = item.querySelector('h2 a') ||
+                                   item.querySelector('a h2') ||
+                                   item.querySelector('h2[class*="title"]') ||
+                                   item.querySelector('a[class*="title"]') ||
+                                   item.querySelector('h2') ||
+                                   item.querySelector('h3 a');
 
-                if not product["titulo"]:
-                    continue
+                    if (titleEl) {
+                        titulo = titleEl.innerText.trim();
+                        if (titleEl.tagName === 'A') {
+                            enlace = titleEl.href || '';
+                        } else {
+                            const parentA = titleEl.closest('a') || titleEl.querySelector('a');
+                            if (parentA) enlace = parentA.href || '';
+                        }
+                    }
 
-                # Precio — múltiples estrategias
-                price_text = ""
-                price_selectors = [
-                    "span.andes-money-amount__fraction",
-                    "span[class*='price-tag-fraction']",
-                    "span[class*='money-amount__fraction']",
-                    "div[class*='price'] span[class*='fraction']",
-                    "span.price-tag-fraction",
-                    "[class*='poly-price'] span[class*='fraction']",
-                ]
-                for ps in price_selectors:
-                    price_els = await item.query_selector_all(ps)
-                    if price_els:
-                        # Tomar el primer precio (precio actual, no tachado)
-                        price_text = (await price_els[0].inner_text()).strip()
-                        break
+                    if (!titulo) continue;
 
-                if not price_text:
-                    # Fallback: buscar cualquier texto que parezca precio
-                    all_text = await item.inner_text()
-                    price_match = re.search(r'\$\s*([\d.,]+)', all_text)
-                    if price_match:
-                        price_text = price_match.group(1)
+                    // PRECIO: buscar fracciones de precio
+                    let precio = 0;
+                    let moneda = 'COP';
 
-                # Limpiar precio
-                price_text = re.sub(r'[^\d]', '', price_text)
-                product["precio"] = int(price_text) if price_text else 0
+                    // Buscar el contenedor de precio actual (no tachado/anterior)
+                    const priceContainer = item.querySelector('[class*="poly-price__current"]') ||
+                                          item.querySelector('[class*="price__second-line"]') ||
+                                          item;
 
-                # Moneda
-                currency_el = await item.query_selector(
-                    "span.andes-money-amount__currency-symbol, "
-                    "span[class*='currency-symbol']"
-                )
-                if currency_el:
-                    symbol = (await currency_el.inner_text()).strip()
-                    if "US" in symbol:
-                        product["moneda"] = "USD"
-                    else:
-                        product["moneda"] = "COP"
-                else:
-                    product["moneda"] = "COP"
+                    const fractionEl = priceContainer.querySelector('span[class*="fraction"]') ||
+                                      item.querySelector('span.andes-money-amount__fraction') ||
+                                      item.querySelector('span[class*="price-tag-fraction"]');
 
-                # Enlace (si no se obtuvo del título)
-                if not product.get("enlace"):
-                    link_el = await item.query_selector("a[href*='mercadolibre'], a[href*='meli']")
-                    if link_el:
-                        product["enlace"] = await link_el.get_attribute("href") or ""
-                    else:
-                        # Intentar cualquier enlace
-                        any_link = await item.query_selector("a[href]")
-                        if any_link:
-                            product["enlace"] = await any_link.get_attribute("href") or ""
-                        else:
-                            product["enlace"] = ""
+                    if (fractionEl) {
+                        const priceText = fractionEl.innerText.replace(/[^\\d]/g, '');
+                        precio = parseInt(priceText) || 0;
+                    }
 
-                # Vendedor
-                seller_el = await item.query_selector(
-                    "span.poly-component__seller, "
-                    "p.ui-search-official-store-label, "
-                    "span[class*='seller'], "
-                    "span[class*='official-store']"
-                )
-                if seller_el:
-                    product["vendedor"] = (await seller_el.inner_text()).strip()
-                else:
-                    product["vendedor"] = "N/A"
+                    // Si no encontró con selectores, buscar patrón $ en texto
+                    if (precio === 0) {
+                        const allText = item.innerText || '';
+                        const priceMatch = allText.match(/\\$\\s*([\\d.,]+)/);
+                        if (priceMatch) {
+                            const cleaned = priceMatch[1].replace(/[^\\d]/g, '');
+                            precio = parseInt(cleaned) || 0;
+                        }
+                    }
 
-                # Incluir producto si tiene título (precio 0 es OK)
-                if product.get("titulo"):
-                    products.append(product)
+                    // MONEDA
+                    const currencyEl = item.querySelector('span[class*="currency-symbol"]');
+                    if (currencyEl) {
+                        const symbol = currencyEl.innerText.trim();
+                        if (symbol.includes('US')) moneda = 'USD';
+                    }
 
-            except Exception as e:
-                print(f"[EXTRACT] Error on item: {e}")
-                continue
+                    // ENLACE (fallback si no se obtuvo del título)
+                    if (!enlace) {
+                        const linkEl = item.querySelector('a[href*="mercadolibre"]') ||
+                                      item.querySelector('a[href*="meli"]') ||
+                                      item.querySelector('a[href]');
+                        if (linkEl) enlace = linkEl.href || '';
+                    }
+
+                    // VENDEDOR
+                    let vendedor = 'N/A';
+                    const sellerEl = item.querySelector('[class*="seller"]') ||
+                                    item.querySelector('[class*="official-store"]') ||
+                                    item.querySelector('span[class*="poly-component__seller"]');
+                    if (sellerEl) vendedor = sellerEl.innerText.trim();
+
+                    results.push({ titulo, precio, moneda, enlace, vendedor });
+
+                } catch (e) {
+                    continue;
+                }
+            }
+
+            return results;
+        }
+        """)
+
+        print(f"[EXTRACT] JS extraction found {len(products)} products")
+        return products if products else []
 
     except Exception as e:
-        print(f"[EXTRACT] Error extracting products: {e}")
-
-    print(f"[EXTRACT] Successfully extracted {len(products)} products")
-    return products
+        print(f"[EXTRACT] JS extraction error: {e}")
+        return []
 
 
 async def extract_products_generic(page, base_url: str) -> list[dict]:
