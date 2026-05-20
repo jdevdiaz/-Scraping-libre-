@@ -197,97 +197,135 @@ async def extract_products_mercadolibre(page) -> list[dict]:
             "li[class*='search-layout__item']",
             "div[class*='poly-card']",
             "section.poly-card",
+            "ol.ui-search-layout li",
+            "div.ui-search-layout__item",
         ]
 
         items = []
         for selector in selectors:
             items = await page.query_selector_all(selector)
-            if items:
+            if len(items) >= 3:
                 break
 
         if not items:
-            # Fallback: intentar con selectores más genéricos
-            items = await page.query_selector_all("ol.ui-search-layout li")
+            # Fallback: buscar cualquier contenedor con enlaces a productos
+            items = await page.query_selector_all("[class*='poly-card'], [class*='search-result']")
+
+        print(f"[EXTRACT] Found {len(items)} potential product items")
 
         for item in items[:50]:  # Max 50 productos
             product = {}
             try:
-                # Título
-                title_el = await item.query_selector(
-                    "h2.poly-component__title a, "
-                    "a.poly-component__title, "
-                    "h2.ui-search-item__title, "
-                    "a.ui-search-link__title-card, "
-                    "h2 a[class*='title']"
-                )
+                # Título — múltiples estrategias
+                title_el = None
+                title_selectors = [
+                    "h2 a",
+                    "a h2",
+                    "h2.poly-component__title a",
+                    "a.poly-component__title",
+                    "h2.ui-search-item__title",
+                    "a.ui-search-link__title-card",
+                    "h2 a[class*='title']",
+                    "a[class*='title']",
+                    "h2",
+                    "h3 a",
+                    "a[title]",
+                ]
+                for ts in title_selectors:
+                    title_el = await item.query_selector(ts)
+                    if title_el:
+                        break
+
                 if title_el:
                     product["titulo"] = (await title_el.inner_text()).strip()
                     href = await title_el.get_attribute("href")
-                    product["enlace"] = href or ""
+                    if href:
+                        product["enlace"] = href
                 else:
-                    # Intentar obtener título de cualquier h2
-                    h2 = await item.query_selector("h2")
-                    if h2:
-                        product["titulo"] = (await h2.inner_text()).strip()
-                    else:
-                        continue
+                    continue  # Sin título no sirve
 
-                # Precio
-                price_el = await item.query_selector(
-                    "span.andes-money-amount__fraction, "
-                    "span[class*='price-tag-fraction'], "
-                    "span.poly-price__current .andes-money-amount__fraction"
-                )
-                if price_el:
-                    price_text = (await price_el.inner_text()).strip()
-                    price_text = re.sub(r'[^\d]', '', price_text)
-                    product["precio"] = int(price_text) if price_text else 0
-                else:
-                    product["precio"] = 0
+                if not product["titulo"]:
+                    continue
+
+                # Precio — múltiples estrategias
+                price_text = ""
+                price_selectors = [
+                    "span.andes-money-amount__fraction",
+                    "span[class*='price-tag-fraction']",
+                    "span[class*='money-amount__fraction']",
+                    "div[class*='price'] span[class*='fraction']",
+                    "span.price-tag-fraction",
+                    "[class*='poly-price'] span[class*='fraction']",
+                ]
+                for ps in price_selectors:
+                    price_els = await item.query_selector_all(ps)
+                    if price_els:
+                        # Tomar el primer precio (precio actual, no tachado)
+                        price_text = (await price_els[0].inner_text()).strip()
+                        break
+
+                if not price_text:
+                    # Fallback: buscar cualquier texto que parezca precio
+                    all_text = await item.inner_text()
+                    price_match = re.search(r'\$\s*([\d.,]+)', all_text)
+                    if price_match:
+                        price_text = price_match.group(1)
+
+                # Limpiar precio
+                price_text = re.sub(r'[^\d]', '', price_text)
+                product["precio"] = int(price_text) if price_text else 0
 
                 # Moneda
                 currency_el = await item.query_selector(
-                    "span.andes-money-amount__currency-symbol"
+                    "span.andes-money-amount__currency-symbol, "
+                    "span[class*='currency-symbol']"
                 )
                 if currency_el:
                     symbol = (await currency_el.inner_text()).strip()
-                    if "$" in symbol:
-                        product["moneda"] = "COP"
-                    elif "US" in symbol:
+                    if "US" in symbol:
                         product["moneda"] = "USD"
                     else:
                         product["moneda"] = "COP"
                 else:
                     product["moneda"] = "COP"
 
-                # Enlace (si no se obtuvo antes)
+                # Enlace (si no se obtuvo del título)
                 if not product.get("enlace"):
-                    link_el = await item.query_selector("a[href*='mercadolibre']")
+                    link_el = await item.query_selector("a[href*='mercadolibre'], a[href*='meli']")
                     if link_el:
                         product["enlace"] = await link_el.get_attribute("href") or ""
                     else:
-                        product["enlace"] = ""
+                        # Intentar cualquier enlace
+                        any_link = await item.query_selector("a[href]")
+                        if any_link:
+                            product["enlace"] = await any_link.get_attribute("href") or ""
+                        else:
+                            product["enlace"] = ""
 
                 # Vendedor
                 seller_el = await item.query_selector(
                     "span.poly-component__seller, "
                     "p.ui-search-official-store-label, "
-                    "span[class*='seller']"
+                    "span[class*='seller'], "
+                    "span[class*='official-store']"
                 )
                 if seller_el:
                     product["vendedor"] = (await seller_el.inner_text()).strip()
                 else:
                     product["vendedor"] = "N/A"
 
-                if product.get("titulo") and product.get("precio", 0) > 0:
+                # Incluir producto si tiene título (precio 0 es OK)
+                if product.get("titulo"):
                     products.append(product)
 
-            except Exception:
+            except Exception as e:
+                print(f"[EXTRACT] Error on item: {e}")
                 continue
 
     except Exception as e:
-        print(f"Error extracting products: {e}")
+        print(f"[EXTRACT] Error extracting products: {e}")
 
+    print(f"[EXTRACT] Successfully extracted {len(products)} products")
     return products
 
 
